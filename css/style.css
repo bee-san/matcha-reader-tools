@@ -246,7 +246,7 @@ textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace
 .row > div { flex: 1 1 160px; }
 
 .checks { display: flex; gap: 0.4rem 1.1rem; flex-wrap: wrap; margin-top: 0.3rem; }
-.checks label { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 400; margin: 0; font-size: 0.95rem; }
+.checks label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; font-weight: 400; margin: 0; font-size: 0.95rem; }
 
 /* Stacked variant, for options that carry an explanation: the description sits UNDER the option
    name rather than running on beside it, aligned to that name instead of the checkbox. Plain
@@ -560,7 +560,9 @@ footer .legal { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid v
 details > summary + .adv-group { margin-top: 1rem; }
 .adv-group .subhead { margin-top: 0; }
 .adv-group .field-label { margin: 1rem 0 0.4rem; }
-.pills { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0.35rem; max-width: 28rem; }
+.pills { display: flex; flex-wrap: wrap; gap: 0.35rem; max-width: 28rem; }
+/* Equal widths while they fit on one line; wrap rather than overflow at large text sizes. */
+.pill { flex: 1 1 0; min-width: max-content; }
 .pill { position: relative; margin: 0; font-weight: 400; }
 .pill input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .pill span { display: flex; align-items: center; min-height: 2.5rem; justify-content: center; padding: 0 0.4rem; border-radius: 999px; white-space: nowrap;
@@ -577,3 +579,11 @@ details > summary + .adv-group { margin-top: 1rem; }
 .choice-art .screen { fill: var(--matcha-light); stroke: var(--control-border); stroke-width: 0.75; }
 .screen-grid .choice-art { width: 36px; height: 50px; }
 .screen-grid .choice { min-height: 0; padding-top: 0.55rem; padding-bottom: 0.55rem; }
+/* Long paths and the coffee button wrap instead of widening the page at large text sizes. */
+code { overflow-wrap: anywhere; }
+.coffee-btn { white-space: normal; max-width: 100%; }
+/* A word longer than the column (German compounds at large text sizes) breaks instead of overflowing. */
+body { overflow-wrap: break-word; }
+h1, h2, h3, p, li { hyphens: auto; }
+/* Code blocks scroll on their own instead of widening the page. */
+pre { max-width: 100%; overflow-x: auto; }
