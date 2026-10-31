@@ -2233,6 +2233,26 @@ if (typeof document !== "undefined" && document.getElementById("manga-run")) {
   $("manga-preview-prev").addEventListener("click", () => { previewPage--; showCleanupPreview(); });
   $("manga-preview-next").addEventListener("click", () => { previewPage++; showCleanupPreview(); });
   wirePanelEditor();
+  // Screen cards: one per screen size. Any device with that size converts the same, so a card
+  // stores the first device key for its size; Other leaves the choice to its pills.
+  const screenKey = { "480x800": "x4", "528x792": "x3", "552x768": "eego", "684x1216": "metalio4plus" };
+  const syncScreenCards = () => {
+    const v = $("manga-res").value;
+    const t = MANGA_DEVICE_TARGETS[v];
+    const card = t ? `${t[0]}x${t[1]}` : v === RES_FULL || v === RES_CUSTOM ? "other" : "";
+    for (const r of document.querySelectorAll('input[name="screen"]')) r.checked = r.value === card;
+    for (const r of document.querySelectorAll('input[name="screen-other"]')) r.checked = r.value === v;
+    $("screen-other").hidden = card !== "other";
+  };
+  for (const r of document.querySelectorAll('input[name="screen"]')) {
+    r.addEventListener("change", () => {
+      const sel = $("manga-res");
+      if (r.value === "other") { if (sel.value !== RES_FULL) sel.value = RES_CUSTOM; } else sel.value = screenKey[r.value];
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+  $("manga-res").addEventListener("change", syncScreenCards);
+  syncScreenCards();
   // Pill rows stand in for the hidden selects the rest of the page reads.
   for (const group of document.querySelectorAll(".pills[data-for]")) {
     const sel = $(group.dataset.for);

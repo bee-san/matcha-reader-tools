@@ -92,30 +92,31 @@
       start at a chapter where one is close.</p>
     </div>
     <div class="field-gap"></div>
-    <label for="manga-res">Device <span class="hint">(sets the page size)</span></label>
-    <select id="manga-res">
+    <p class="field-label" id="screen-title">Device <span class="hint">(sets the page size)</span></p>
+    <div class="choice-grid screen-grid" role="radiogroup" aria-labelledby="screen-title" aria-describedby="manga-res-hint">
+      <label class="choice"><input type="radio" name="screen" value="480x800"><svg class="choice-art" viewBox="0 0 60 84" aria-hidden="true"><rect class="page" x="13.2" y="14.0" width="33.6" height="56" rx="5"/><rect class="screen" x="17.2" y="18.0" width="25.6" height="44" rx="1.5"/></svg><span class="choice-title">Xteink X4, X4C, X4 Pro</span><span class="choice-sub">Also Sticky, Papermono, BOOX Picco, Metalio E-Ink 4 · 480 × 800</span></label>
+      <label class="choice"><input type="radio" name="screen" value="528x792"><svg class="choice-art" viewBox="0 0 60 84" aria-hidden="true"><rect class="page" x="11.3" y="14.0" width="37.3" height="56" rx="5"/><rect class="screen" x="15.3" y="18.0" width="29.3" height="44" rx="1.5"/></svg><span class="choice-title">Xteink X3</span><span class="choice-sub">528 × 792</span></label>
+      <label class="choice"><input type="radio" name="screen" value="552x768"><svg class="choice-art" viewBox="0 0 60 84" aria-hidden="true"><rect class="page" x="9.9" y="14.0" width="40.2" height="56" rx="5"/><rect class="screen" x="13.9" y="18.0" width="32.2" height="44" rx="1.5"/></svg><span class="choice-title">EEGO Reader A4</span><span class="choice-sub">552 × 768</span></label>
+      <label class="choice"><input type="radio" name="screen" value="684x1216"><svg class="choice-art" viewBox="0 0 60 84" aria-hidden="true"><rect class="page" x="14.2" y="14.0" width="31.5" height="56" rx="5"/><rect class="screen" x="18.2" y="18.0" width="23.5" height="44" rx="1.5"/></svg><span class="choice-title">Metalio E-Ink 4 Plus</span><span class="choice-sub">684 × 1216</span></label>
+      <label class="choice"><input type="radio" name="screen" value="other"><svg class="choice-art" viewBox="0 0 60 84" aria-hidden="true"><rect class="page dashed" x="13.2" y="14.0" width="33.6" height="56" rx="5"/></svg><span class="choice-title">Other</span><span class="choice-sub">Full size or your own</span></label>
+    </div>
+    <div id="screen-other" hidden>
+      <div class="pills" role="radiogroup" aria-label="Other size" data-for="manga-res"><label class="pill"><input type="radio" name="screen-other" value="custom"><span>Enter a size</span></label><label class="pill"><input type="radio" name="screen-other" value="full"><span>Keep full size</span></label></div>
+    </div>
+    <!-- The page's state for the screen size: the cards above set it. -->
+    <select id="manga-res" hidden aria-hidden="true" tabindex="-1">
       <option value="">Please select</option>
-      <optgroup label="480 × 800">
-        <option value="x4">Xteink X4 / X4C</option>
-        <option value="x4pro">Xteink X4 Pro</option>
-        <option value="sticky">Sticky</option>
-        <option value="papermono">Papermono</option>
-        <option value="picco">BOOX Picco</option>
-        <option value="metalio">Metalio E-Ink 4 (3.97")</option>
-      </optgroup>
-      <optgroup label="528 × 792">
-        <option value="x3">Xteink X3</option>
-      </optgroup>
-      <optgroup label="552 × 768">
-        <option value="eego">EEGO Reader A4</option>
-      </optgroup>
-      <optgroup label="684 × 1216">
-        <option value="metalio4plus">Metalio E-Ink 4 Plus</option>
-      </optgroup>
-      <optgroup label="Other">
-        <option value="full">Full resolution — High file size</option>
-        <option value="custom">Custom — enter a size</option>
-      </optgroup>
+      <option value="x4">Xteink X4 / X4C</option>
+      <option value="x4pro">Xteink X4 Pro</option>
+      <option value="sticky">Sticky</option>
+      <option value="papermono">Papermono</option>
+      <option value="picco">BOOX Picco</option>
+      <option value="metalio">Metalio E-Ink 4</option>
+      <option value="x3">Xteink X3</option>
+      <option value="eego">EEGO Reader A4</option>
+      <option value="metalio4plus">Metalio E-Ink 4 Plus</option>
+      <option value="full">Full resolution</option>
+      <option value="custom">Custom</option>
     </select>
     <div class="res-custom" id="manga-res-custom" hidden>
       <label for="manga-res-w">Width (px)

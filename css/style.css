@@ -570,3 +570,10 @@ details > summary + .adv-group { margin-top: 1rem; }
 .pill input:focus-visible + span { outline: 2px solid var(--matcha-dark); outline-offset: 2px; }
 .pills + .hint { margin-top: 0.45rem; }
 .adv-group .preview-row { margin-top: 1rem; }
+
+/* Device cards: the outline is the screen drawn to scale against the others. */
+.choice-art .page.dashed { stroke-dasharray: 4 3; }
+#screen-other { margin-top: 0.6rem; }
+.choice-art .screen { fill: var(--matcha-light); stroke: var(--control-border); stroke-width: 0.75; }
+.screen-grid .choice-art { width: 36px; height: 50px; }
+.screen-grid .choice { min-height: 0; padding-top: 0.55rem; padding-bottom: 0.55rem; }
