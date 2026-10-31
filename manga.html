@@ -176,53 +176,61 @@
 
     <details id="manga-detect-advanced">
       <summary>Advanced</summary>
+      <div class="adv-group" role="group" aria-labelledby="adv-detect-title">
+      <div class="subhead" id="adv-detect-title">Panel detection</div>
       <div class="checks stacked">
         <label id="manga-yolo-row"><input type="checkbox" id="manga-yolo" checked> <span class="opt">AI panel detection</span>
-          <span class="hint">Spots panels more reliably, including ones without white borders. It
-          runs here in the browser: pages are not uploaded anywhere and no AI company sees
-          them. The detector is downloaded once from this site (~21&nbsp;MB) and kept for next time.
-          Untick to use the faster white-border detection instead.</span></label>
-        <label id="manga-rotate-row"><input type="checkbox" id="manga-rotate-panels" checked> <span class="opt">Rotate wide panels to portrait</span>
-          <span class="hint">EPUB, PDF and XTC/XTCH only. Those carry pre-rendered images, so a wide
-          panel is turned upright to fill the screen. Untick to keep panels as drawn. Matcha Reader
-          format rotates them on the device instead.</span></label>
-        <label id="manga-mono-row"><input type="checkbox" id="manga-mono"> <span class="opt">1-bit BMP (Floyd–Steinberg dithering)</span>
-          <span class="hint">Black-and-white pages that turn faster on the device. Best for line
-          art. Screentone becomes dither patterns.</span></label>
+          <span class="hint">Finds panels without white borders too. Runs in the browser; pages are
+          never uploaded. Downloads once (~21&nbsp;MB).</span></label>
+        <label id="manga-rotate-row"><input type="checkbox" id="manga-rotate-panels" checked> <span class="opt">Turn wide panels sideways</span>
+          <span class="hint">A wide panel is rotated so it fills the tall screen; turn the device to read it. For EPUB, PDF and XTC/XTCH. Matcha Reader files do this on the device.</span></label>
+      </div>
+      </div>
+
+      <div class="adv-group" role="group" aria-labelledby="adv-bw-title">
+      <div class="subhead" id="adv-bw-title">Black and white</div>
+      <div class="checks stacked">
+        <label id="manga-mono-row"><input type="checkbox" id="manga-mono"> <span class="opt">Black-and-white pages</span>
+          <span class="hint">Pages turn faster on the device. Grey areas are drawn as fine dots, like a newspaper photo. Best for clean black-and-white art.</span></label>
       </div>
       <div id="manga-dither-row">
-        <label for="manga-dither">Dither brightness</label>
-        <select id="manga-dither">
+      <p class="field-label" id="dither-pill-title">Brightness</p>
+      <div class="pills" role="radiogroup" aria-labelledby="dither-pill-title" data-for="manga-dither" aria-describedby="dither-hint"><label class="pill"><input type="radio" name="dither-pill" value="lightest"><span>Lightest</span></label><label class="pill"><input type="radio" name="dither-pill" value="lighter"><span>Lighter</span></label><label class="pill"><input type="radio" name="dither-pill" value="normal"><span>Normal</span></label><label class="pill"><input type="radio" name="dither-pill" value="darker"><span>Darker</span></label></div>
+        <p class="hint" id="dither-hint">If pages look too dark, pick a lighter setting.</p>
+      <p class="field-label" id="dither-style-pill-title">Dot pattern</p>
+      <div class="pills" role="radiogroup" aria-labelledby="dither-style-pill-title" data-for="manga-dither-style" aria-describedby="dither-style-hint"><label class="pill"><input type="radio" name="dither-style-pill" value="floyd"><span>Smooth</span></label><label class="pill"><input type="radio" name="dither-style-pill" value="atkinson"><span>Crisp</span></label><label class="pill"><input type="radio" name="dither-style-pill" value="ordered"><span>Grid</span></label></div>
+        <p class="hint" id="dither-style-hint">How grey areas become dots. Smooth works for most pages. Crisp keeps lines sharper and white areas cleaner. Grid gives an even pattern that suits dotted shading.</p>
+        <select id="manga-dither" hidden aria-hidden="true" tabindex="-1">
           <option value="lightest">Lightest</option>
           <option value="lighter">Lighter</option>
           <option value="normal">Normal</option>
           <option value="darker">Darker</option>
         </select>
-        <p class="hint">Some scans dither darker than the original. Lighten them here. Affects
-        1-bit BMP and XTC/XTCH only; JPEG and PNG pages are untouched.</p>
-        <label for="manga-dither-style">Dither style</label>
-        <select id="manga-dither-style">
-          <option value="floyd">Floyd-Steinberg (smooth)</option>
-          <option value="atkinson">Atkinson (crisper lines, cleaner paper)</option>
-          <option value="ordered">Ordered pattern (regular, good for screentone)</option>
+        <select id="manga-dither-style" hidden aria-hidden="true" tabindex="-1">
+          <option value="floyd">Smooth</option>
+          <option value="atkinson">Crisp</option>
+          <option value="ordered">Grid</option>
         </select>
       </div>
-          <div class="subhead" id="cleanup-title">Image clean-up</div>
-      <div id="card-cleanup" role="group" aria-labelledby="cleanup-title">
-      <p class="hint" style="margin-top:0">Helps old or faded scans read better on e-ink.</p>
-    <div class="checks stacked">
-      <label><input type="checkbox" id="manga-levels"> <span class="opt">Clean up faded scans</span>
-        <span class="hint">Makes yellowed paper white and grey ink black.</span></label>
-      <label><input type="checkbox" id="manga-sharpen"> <span class="opt">Sharpen</span>
-        <span class="hint">Crisper lines and small text after shrinking to the screen.</span></label>
-    </div>
-    <label for="manga-contrast">Darker midtones</label>
-    <select id="manga-contrast">
-      <option value="off">Off</option>
-      <option value="light">Light</option>
-      <option value="medium">Medium</option>
-      <option value="strong">Strong</option>
-    </select>
+      </div>
+
+      <div class="adv-group" id="card-cleanup" role="group" aria-labelledby="cleanup-title">
+      <div class="subhead" id="cleanup-title">Clean-up</div>
+      <div class="checks stacked">
+        <label><input type="checkbox" id="manga-levels"> <span class="opt">Fix faded scans</span>
+          <span class="hint">Yellowed paper turns white, grey ink turns black.</span></label>
+        <label><input type="checkbox" id="manga-sharpen"> <span class="opt">Sharpen</span>
+          <span class="hint">Makes lines and small text crisper.</span></label>
+      </div>
+      <p class="field-label" id="contrast-pill-title">Darker greys</p>
+      <div class="pills" role="radiogroup" aria-labelledby="contrast-pill-title" data-for="manga-contrast"><label class="pill"><input type="radio" name="contrast-pill" value="off"><span>Off</span></label><label class="pill"><input type="radio" name="contrast-pill" value="light"><span>Light</span></label><label class="pill"><input type="radio" name="contrast-pill" value="medium"><span>Medium</span></label><label class="pill"><input type="radio" name="contrast-pill" value="strong"><span>Strong</span></label></div>
+      <p class="hint">Makes light grey areas darker, so faint shading shows up on e-ink.</p>
+      <select id="manga-contrast" hidden aria-hidden="true" tabindex="-1">
+        <option value="off">Off</option>
+        <option value="light">Light</option>
+        <option value="medium">Medium</option>
+        <option value="strong">Strong</option>
+      </select>
     <div class="preview-row">
       <button type="button" class="secondary" id="manga-preview-btn" aria-expanded="false" aria-controls="manga-preview">Show preview</button>
     </div>

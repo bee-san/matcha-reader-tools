@@ -556,10 +556,11 @@ const BOOK_TYPE_HINTS = {
       "bottom, then the column to its right.",
 };
 
-const YOLO_HINT = "Runs the YOLO26 model in the browser, ~21 MB once, then cached. " +
-  "Untick for the faster white-gutter heuristic.";
-const YOLO_HINT_WEBTOON = "Not used for webtoons. Their panels come from the strip's gutters, " +
-  "and the model only finds bordered panels on a page.";
+const YOLO_HINT = "Finds panels more reliably, even ones without a white border. Runs in the " +
+  "browser; pages are never uploaded. A one-time 21 MB download. Untick for a faster, simpler " +
+  "search that looks for white space between panels.";
+const YOLO_HINT_WEBTOON = "Not used for webtoons. Their panels are cut where the strip has white " +
+  "space, and the AI only finds panels on a normal page.";
 
 /* The panel detector is fine-tuned on Manga109, so a western page is out of its training
  * distribution and it misses panels: on a dense four-panel Moomin strip page it found 10 of
@@ -2232,6 +2233,15 @@ if (typeof document !== "undefined" && document.getElementById("manga-run")) {
   $("manga-preview-prev").addEventListener("click", () => { previewPage--; showCleanupPreview(); });
   $("manga-preview-next").addEventListener("click", () => { previewPage++; showCleanupPreview(); });
   wirePanelEditor();
+  // Pill rows stand in for the hidden selects the rest of the page reads.
+  for (const group of document.querySelectorAll(".pills[data-for]")) {
+    const sel = $(group.dataset.for);
+    const radios = group.querySelectorAll('input[type="radio"]');
+    for (const r of radios) {
+      r.checked = r.value === sel.value;
+      r.addEventListener("change", () => { sel.value = r.value; sel.dispatchEvent(new Event("change", { bubbles: true })); });
+    }
+  }
   // Every setting that changes what Convert will do refreshes the line beside it.
   document.querySelector("main").addEventListener("change", updateRunSummary);
   updateRunSummary();

@@ -114,9 +114,11 @@ changed, and 21 MB for the model alone. Bump their paths if one is replaced.
 | **Translate into** | *(browser only)* | Language the translations come back in. The desktop tool always uses English. |
 | **Language** (step 5) | `--language` | Splits reading stats by language, and tells OCR what to expect. `jp`→`ja`, `cn`→`zh`, `kr`→`ko`; `zh-Hant` kept intact. |
 | **AI panel detection** | — | YOLO26 in-browser. Untick for the white-gutter heuristic, which is also the automatic fallback. Disabled for webtoons, whose panels come from gutters. |
-| **Rotate wide panels** | — | EPUB, PDF and XTC/XTCH only: those bake in orientation. The Matcha format rotates on the device instead. |
-| **1-bit BMP** | `--mono` | Dithered black-and-white pages. One fast refresh on the device. Best for line art. |
-| **Dither brightness** | *(browser only)* | Gamma applied before dithering, for scans that come out darker than the original. Affects 1-bit BMP and XTC/XTCH only. |
+| **Turn wide panels sideways** | — | EPUB, PDF and XTC/XTCH only: those bake in orientation. The Matcha format rotates on the device instead. |
+| **Black-and-white pages** | `--mono` | Dithered black-and-white pages. One fast refresh on the device. Best for line art. |
+| **Brightness** | *(browser only)* | Gamma applied before dithering, for scans that come out darker than the original. Affects black-and-white pages and XTC/XTCH only. |
+| **Dot pattern** | *(browser only)* | Smooth (Floyd–Steinberg), Crisp (Atkinson) or Grid (ordered). Affects black-and-white pages and XTC/XTCH only. |
+| **Fix faded scans**, **Sharpen**, **Darker greys** | *(browser only)* | Clean-up before conversion, with a before/after preview. |
 
 **EPUB** is fixed-layout EPUB 3, right-to-left, each page followed by its panels, with the chapter
 list carried over. **PDF** holds the same images, one per page, for any PDF viewer. **XTC / XTCH** is Xteink's own format for the stock firmware, 1-bit and 4-level
