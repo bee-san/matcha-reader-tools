@@ -892,7 +892,7 @@ function convertChineseFixture(inputs, opts = {}) {
   const lang = opts.lang || "zh";
   const twins = new Map();
   const zhOpts = {
-    zhuyin: !!opts.zhuyin, splitNames: !!opts.splitNames, twins, shares: new Map(), seen: new Set(),
+    zhuyin: !!opts.zhuyin, splitNames: !!opts.splitNames, twins, tradsOf: new Map(), seen: new Map(),
     levels: opts.levels ? zh.loadLevels(zhText(opts.levels), opts.levelName || "HSK") : new Map(),
     jyutping: opts.jyutping ? zh.loadCantoReadings(zhText(opts.jyutping)) : new Map(),
     sentencePairs: opts.examples ? zh.loadSentencePairs(zhText(opts.examples), opts.examplesScript || "any") : null,
@@ -924,8 +924,9 @@ function convertChineseFixture(inputs, opts = {}) {
   if (names.length) ({ records, names } = zh.keepNamesTogether(records, names, bilingual));
   if (opts.frequency) {
     const { priorities } = zh.loadFrequency(zhText(opts.frequency), opts.frequencyKind || "auto");
-    records = zh.applyFrequency(records, priorities, twins, zhOpts.shares);
-    names = zh.applyFrequency(names, priorities, twins, zhOpts.shares);
+    const shares = zh.sharedSimplifiedCounts(zhOpts.tradsOf);
+    records = zh.applyFrequency(records, priorities, twins, shares);
+    names = zh.applyFrequency(names, priorities, twins, shares);
   }
   return { records, names, title: opts.title || zh.joinDictTitles(titles) };
 }

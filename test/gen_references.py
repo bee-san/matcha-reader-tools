@@ -705,6 +705,11 @@ CEDICT_LINES = """# CC-CEDICT test fixture
 著 着 [zhe5] /aspect particle/
 吐溫 吐温 [Tu3 wen1] /see 馬克·吐溫|马克·吐温[Ma3 ke4 · Tu3 wen1]/
 綠 绿 [lv4] /green (v spelling)/
+一月 一月 [yi1 yue4] /January/
+統一 统一 [tong3 yi1] /to unify/
+行動 行动 [xing2 dong4] /action/
+人人 人人 [ren2 ren2] /everyone/
+地位 地位 [di4 wei4] /position/
 malformed line without brackets
 """
 
@@ -737,6 +742,7 @@ FREQ_LINES = """的 3188252 uj
 和尚 5000 n
 你好 2000 l
 干 1000 v
+乾 10 a
 說 3 zg
 """
 
@@ -800,7 +806,8 @@ BOOK_XHTML = (
 # does not fit the word.
 AI_ZH_XHTML = ('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>石</title></head><body>'
                '<p>石头很重。一石米。他說話。</p><p>这是&lt;好&gt;的。</p>'
-               '<p>一个东西不是一天。哪儿？慢慢地着。</p></body></html>')
+               '<p>一个东西不是一天。哪儿？慢慢地着。</p>'
+               '<p>不<em>是</em>一月。统一行动。人人地位。第<b>一天</b>。</p></body></html>')
 AI_ZH_ANSWERS = {
     "石头很重。": ["shi2", "tou5", "hen4", "zhong4"],
     "一石米。": ["yi1", "dan4", "mi3"],

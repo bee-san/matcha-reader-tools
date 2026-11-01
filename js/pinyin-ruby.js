@@ -144,8 +144,9 @@ const SANDHI_NUMERALS = new Set(Array.from("〇零一二三四五六七八九十
 
 /* readings: one syllable or null per character of chars. 一 and 不 take the tone they are spoken
  * with before the next syllable: 4th -> 2nd for both, else 一 -> 4th. 一 keeps its 1st tone as a
- * number (第一, 十一, 一 alone or last, before another numeral). */
-function spokenTones(chars, readings) {
+ * number (第一, 十一, 一月, 一 alone or last, before another numeral) and inside a word it does not
+ * begin (统一, 星期一). wordStart: true where a dictionary word begins. */
+function spokenTones(chars, readings, wordStart = null) {
   const out = readings.slice();
   for (let i = 0; i < readings.length; i++) {
     const syl = readings[i];
@@ -153,7 +154,8 @@ function spokenTones(chars, readings) {
     const ch = chars[i], after = readings[i + 1];
     if (ch === "不" && syl.toLowerCase() === "bu4" && sylTone(after) === 4) {
       out[i] = "bu2";
-    } else if (ch === "一" && syl.toLowerCase() === "yi1" && !SANDHI_NUMERALS.has(chars[i + 1])
+    } else if (ch === "一" && syl.toLowerCase() === "yi1" && (wordStart === null || wordStart[i])
+               && !SANDHI_NUMERALS.has(chars[i + 1]) && !"月号號日".includes(chars[i + 1])
                && (i === 0 || !SANDHI_NUMERALS.has(chars[i - 1]))) {
       out[i] = sylTone(after) === 4 ? "yi2" : "yi4";
     }
@@ -177,40 +179,77 @@ function rubyFor(chunk, syllables, zhuyin) {
   return groups.map(([c, r]) => `<ruby>${htmlEscape(c)}<rt>${htmlEscape(r)}</rt></ruby>`).join("");
 }
 
+// Tags that stay inside a phrase: the tone of 不 in 不<em>是</em> depends on the next word all the same.
+const INLINE_TAGS = new Set(["a", "abbr", "b", "bdi", "bdo", "big", "cite", "code", "dfn", "em", "font", "i", "kbd",
+  "mark", "q", "s", "samp", "small", "span", "strike", "strong", "sub", "sup", "tt", "u", "var"]);
+const TAG_NAME_RE = /^<\s*\/?\s*([A-Za-z][\w:.-]*)/;
+
+function isInlineTag(piece) {
+  const m = TAG_NAME_RE.exec(piece);
+  return !!m && INLINE_TAGS.has(m[1].toLowerCase().split(":").pop());
+}
+
 /* Annotate one XHTML document. skip: Set of words to leave bare. contextual: the Map from
  * contextualReadings(), overriding the dictionary's reading character by character. citation
- * keeps dictionary tones (no 一/不 sandhi). */
+ * keeps dictionary tones (no 一/不 sandhi). Readings are decided over a phrase: text joined across
+ * inline tags, up to a block tag or existing ruby. */
 function annotateXhtml(doc, words, skip, zhuyin, contextual = null, citation = false) {
-  const out = [];
-  for (const [piece, isText] of textPieces(doc)) {
-    if (!isText) {
-      out.push(piece);
-      continue;
-    }
-    const text = htmlUnescape(piece);
-    if (!PINYIN_HAN.test(text)) {
-      out.push(piece);
-      continue;
-    }
-    const override = (contextual && contextual.get(text)) || new Map();
-    const chars = Array.from(text);
-    const chunks = [...segmentForRuby(chars, words)];
-    // One reading per character first, so a tone change can look at the next word.
-    let readings = [];
-    for (const [chunk, syllables] of chunks) {
-      const len = Array.from(chunk).length;
-      for (let k = 0; k < len; k++) {
-        const pos = readings.length;
-        readings.push(override.has(pos) ? override.get(pos) : (syllables ? syllables[k] : null));
-      }
-    }
-    // 地 after a doubled adjective is the adverb marker: 慢慢地 mànmàn de, not dì.
+  const pieces = [...textPieces(doc)];
+  const plans = new Map();  // piece index -> {chars, chunks, readings, starts, lengths}
+  let run = [];
+  const finishRun = () => {
+    if (!run.length) return;
+    const chars = run.flatMap((k) => plans.get(k).chars);
+    let readings = run.flatMap((k) => plans.get(k).readings);
+    const starts = run.flatMap((k) => plans.get(k).starts);
+    const lengths = run.flatMap((k) => plans.get(k).lengths);
+    // 地 standing alone after a doubled adjective is the adverb marker: 慢慢地 mànmàn de, not dì.
     for (let i = 2; i < chars.length; i++) {
-      if (chars[i] === "地" && chars[i - 1] === chars[i - 2] && PINYIN_HAN.test(chars[i - 1]) && readings[i] === "di4") {
+      if (chars[i] === "地" && lengths[i] === 1 && chars[i - 1] === chars[i - 2] && PINYIN_HAN.test(chars[i - 1])
+          && readings[i] === "di4") {
         readings[i] = "de5";
       }
     }
-    if (!citation) readings = spokenTones(chars, readings);
+    if (!citation) readings = spokenTones(chars, readings, starts);
+    let offset = 0;
+    for (const k of run) {
+      const plan = plans.get(k);
+      plan.readings = readings.slice(offset, offset + plan.chars.length);
+      offset += plan.chars.length;
+    }
+    run = [];
+  };
+  pieces.forEach(([piece, isText], k) => {
+    if (!isText) {
+      if (!isInlineTag(piece)) finishRun();
+      return;
+    }
+    const text = htmlUnescape(piece);
+    const override = (contextual && contextual.get(text)) || new Map();
+    const chars = Array.from(text);
+    const chunks = [...segmentForRuby(chars, words)];
+    const readings = [], starts = [], lengths = [];
+    for (const [chunk, syllables] of chunks) {
+      const len = Array.from(chunk).length;
+      for (let c = 0; c < len; c++) {
+        const pos = readings.length;
+        readings.push(override.has(pos) ? override.get(pos) : (syllables ? syllables[c] : null));
+        starts.push(c === 0);
+        lengths.push(len);
+      }
+    }
+    plans.set(k, { chars, chunks, readings, starts, lengths });
+    run.push(k);
+  });
+  finishRun();
+
+  const out = [];
+  pieces.forEach(([piece, isText], k) => {
+    if (!isText || !PINYIN_HAN.test(plans.get(k).chars.join(""))) {
+      out.push(piece);
+      return;
+    }
+    const { chunks, readings } = plans.get(k);
     const built = [];
     let offset = 0;
     for (const [chunk] of chunks) {
@@ -224,7 +263,7 @@ function annotateXhtml(doc, words, skip, zhuyin, contextual = null, citation = f
       offset += len;
     }
     out.push(built.join(""));
-  }
+  });
   return out.join("");
 }
 

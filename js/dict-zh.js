@@ -208,6 +208,17 @@ function loadFrequency(text, kind = "auto") {
 /* Replace each record's priority with its frequency rank, taken from either script's form of
  * the word (twins, from CC-CEDICT): the lists are written in one script, and the device
  * segments a traditional book with the traditional records. */
+/* Map(traditional form -> how many traditional forms share its simplified form) from
+ * Map(simplified -> Set(traditional)), for applyFrequency. 干 stands for 乾, 幹 and 干 itself: 3. */
+function sharedSimplifiedCounts(tradsOf) {
+  const shares = new Map();
+  for (const trads of tradsOf.values()) {
+    if (trads.size < 2) continue;
+    for (const trad of trads) shares.set(trad, Math.max(shares.get(trad) || 1, trads.size));
+  }
+  return shares;
+}
+
 function applyFrequency(records, priorities, twins, shares) {
   if (!priorities || !priorities.size) return records;
   twins = twins || new Map();
@@ -400,10 +411,11 @@ function loadCantoReadings(text) {
 /* Convert a raw CC-CEDICT (or CC-Canto) file to index records, one per traditional and
  * simplified form. Returns {records, names, entryCount, skipped, examplesDropped,
  * examplesAttached}; names is empty unless splitNames routes proper nouns into the names slot.
- * twins (a Map), when given, is filled with each form's other-script form for applyFrequency;
- * shares with how many traditional forms share each one's simplified form. seen (a Set), shared
- * across the inputs of one build, drops an entry an earlier input already held (CC-Canto
- * repeats CC-CEDICT entries it adapted). */
+ * twins (a Map), when given, is filled with each form's other-script form for applyFrequency.
+ * tradsOf (a Map), shared across the inputs of one build, collects each simplified form's
+ * traditional forms (see sharedSimplifiedCounts). seen (a Map), shared likewise, drops an entry
+ * an earlier input already held (CC-Canto repeats CC-CEDICT entries it adapted) unless only this
+ * copy carries a Cantonese reading. */
 function convertCedict(text, opts = {}) {
   const zhuyin = !!opts.zhuyin;
   const splitNames = !!opts.splitNames;
@@ -411,9 +423,8 @@ function convertCedict(text, opts = {}) {
   const jyutping = opts.jyutping || new Map();
   let sentencePairs = opts.sentencePairs || null;
   const twins = opts.twins || null;
-  const shares = opts.shares || null;
   const seen = opts.seen || null;
-  const tradsOf = new Map();  // simplified form -> its traditional forms
+  const tradsOf = opts.tradsOf || new Map();
   const examplesScript = opts.examplesScript || "any";
 
   const parsed = [];  // {trad, simp, pinyin, canto, glosses}
@@ -425,10 +436,13 @@ function convertCedict(text, opts = {}) {
     if (!m) { skipped++; continue; }
     const [, trad, simp, pinyin, canto, body] = m;
     const glosses = splitCedictGlosses(body);
+    if (!tradsOf.has(simp)) tradsOf.set(simp, new Set());
+    tradsOf.get(simp).add(trad);
     if (seen) {
       const key = JSON.stringify([trad, simp, pinyin.toLowerCase(), glosses]);
-      if (seen.has(key)) { skipped++; continue; }
-      seen.add(key);
+      const hasCanto = !!(canto || jyutping.get(cantoKey(trad, simp, pinyin)));
+      if (seen.has(key) && (seen.get(key) || !hasCanto)) { skipped++; continue; }
+      seen.set(key, hasCanto);
     }
     const idx = parsed.length;
     parsed.push({ trad, simp, pinyin, canto: canto || "", glosses });
@@ -444,16 +458,6 @@ function convertCedict(text, opts = {}) {
     if (twins && trad !== simp) {
       if (!twins.has(trad)) twins.set(trad, simp);
       if (!twins.has(simp)) twins.set(simp, trad);
-      if (!tradsOf.has(simp)) tradsOf.set(simp, new Set());
-      tradsOf.get(simp).add(trad);
-    }
-  }
-  if (shares) {
-    const tradForms = new Set(parsed.map((e) => e.trad));
-    for (const [simp, trads] of tradsOf) {
-      // 干 is also a traditional character of its own, a third claim on the count.
-      const claims = trads.size + (tradForms.has(simp) && !trads.has(simp) ? 1 : 0);
-      for (const trad of trads) shares.set(trad, Math.max(shares.get(trad) || 1, claims));
     }
   }
   let examplesDropped = 0;
@@ -699,7 +703,7 @@ function encodeDictTitle(title) {
 if (typeof module !== "undefined") {
   module.exports = {
     pinyinSyllableToMarks, pinyinToMarks, pinyinSyllableToZhuyin, pinyinToZhuyin, prettifyCedictGloss,
-    HAN_RE, UNRANKED_PRIORITY, splitVariants, rankToPriority, loadFrequency, applyFrequency,
+    HAN_RE, UNRANKED_PRIORITY, splitVariants, rankToPriority, loadFrequency, sharedSimplifiedCounts, applyFrequency,
     CEDICT_LINE_RE, formatDefinitionCedict, sentenceScript, loadSentencePairs, attachExamples,
     isProperNounPinyin, loadCantoReadings, convertCedict, loadLevels, convertTsv,
     stripHtml, moeText, formatDefinitionsMoedict, convertMoedict, splitCedictGlosses,
