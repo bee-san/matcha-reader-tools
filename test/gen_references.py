@@ -693,6 +693,18 @@ CEDICT_LINES = """# CC-CEDICT test fixture
 這 这 [zhe4] /this/
 好 好 [hao3] /good/
 好 好 [hao4] /to be fond of/
+乾 干 [gan1] /dry/
+幹 干 [gan4] /to do/
+干 干 [gan1] /shield/
+個 个 [ge4] /individual/
+天 天 [tian1] /day/
+哪兒 哪儿 [na3 r5] /where?/
+慢 慢 [man4] /slow/
+地 地 [di4] /earth/ground/
+著 着 [zhao1] /(chess) move/
+著 着 [zhe5] /aspect particle/
+吐溫 吐温 [Tu3 wen1] /see 馬克·吐溫|马克·吐温[Ma3 ke4 · Tu3 wen1]/
+綠 绿 [lv4] /green (v spelling)/
 malformed line without brackets
 """
 
@@ -701,6 +713,7 @@ CANTO_LINES = """# CC-Canto test fixture
 唔係 唔系 [m2 xi4] {m4 hai6} /is not (Cantonese)/
 佢哋 佢哋 [qu2 di4] {keoi5 dei6} /they (Cantonese)/
 唔 唔 [wu2] {m4} /(phrase / adverb / noun) no, not./
+好 好 [hao3] {hou2} /good/ # adapted from cc-cedict
 """
 
 CANTO_READINGS = """# cccedict-canto-readings test fixture
@@ -723,6 +736,7 @@ FREQ_LINES = """的 3188252 uj
 尚未 6000 d
 和尚 5000 n
 你好 2000 l
+干 1000 v
 說 3 zg
 """
 
@@ -785,7 +799,8 @@ BOOK_XHTML = (
 # reading CC-CEDICT does not list (dictionary kept), a word not in the sentence, a reading that
 # does not fit the word.
 AI_ZH_XHTML = ('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>石</title></head><body>'
-               '<p>石头很重。一石米。他說話。</p><p>这是&lt;好&gt;的。</p></body></html>')
+               '<p>石头很重。一石米。他說話。</p><p>这是&lt;好&gt;的。</p>'
+               '<p>一个东西不是一天。哪儿？慢慢地着。</p></body></html>')
 AI_ZH_ANSWERS = {
     "石头很重。": ["shi2", "tou5", "hen4", "zhong4"],
     "一石米。": ["yi1", "dan4", "mi3"],

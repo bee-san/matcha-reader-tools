@@ -21,7 +21,7 @@ const SYLLABLE_RE = /^([A-Za-zü:]+?)([1-5])$/;
 function pinyinSyllableToMarks(syllable) {
   const m = SYLLABLE_RE.exec(syllable);
   if (!m) return syllable;
-  const base = m[1].split("u:").join("ü").split("U:").join("Ü");
+  const base = m[1].split("u:").join("ü").split("U:").join("Ü").split("v").join("ü").split("V").join("Ü");
   const tone = parseInt(m[2], 10);
   if (tone === 5) return base;
   const lower = base.toLowerCase();
@@ -40,9 +40,13 @@ function pinyinSyllableToMarks(syllable) {
   return base.slice(0, idx) + marked + base.slice(idx + 1);
 }
 
-/* Space-separated numbered-tone string ('ni3 hao3') to diacritics. */
+const NUMBERED_SYLLABLE_RE = /[A-Za-zü:]+[1-5]/g;
+
+/* Numbered-tone string ('ni3 hao3') to diacritics. An erhua r5 joins the syllable before it
+ * (hua1 r5 -> huār); separators other than spaces (commas, ·) are kept. */
 function pinyinToMarks(numbered) {
-  return numbered.split(" ").map(pinyinSyllableToMarks).join(" ");
+  const marked = numbered.replace(NUMBERED_SYLLABLE_RE, pinyinSyllableToMarks);
+  return marked.replace(/(?<=\S) r(?=$|[\s,·])/g, "r");
 }
 
 const ZHUYIN_INITIALS = [
@@ -93,7 +97,8 @@ function pinyinSyllableToZhuyin(syllable) {
     if (final === undefined || (!initial && rest !== base)) return syllable;
     body = initial + final;
   }
-  if (tone === 5) return "˙" + body;
+  // Erhua ㄦ is written without the neutral-tone dot (哪兒 ㄋㄚˇ ㄦ).
+  if (tone === 5) return base === "r" ? body : "˙" + body;
   return body + ZHUYIN_TONES[tone];
 }
 
@@ -101,7 +106,7 @@ function pinyinToZhuyin(numbered) {
   return numbered.split(" ").map(pinyinSyllableToZhuyin).join(" ");
 }
 
-const BRACKETED_PINYIN_RE = /\[([A-Za-z0-9:üÜ ,]+)\]/g;
+const BRACKETED_PINYIN_RE = /\[([A-Za-z0-9:üÜ ,·]+)\]/g;
 // A word given in both scripts inside a gloss: 個|个, 237號房間|237号房间, 對…|对…. Not every bar:
 // only one that touches a CJK character.
 const SCRIPT_PAIR_BAR_RE = /(?<=[\u3400-\u9fff\uf900-\ufaff])\||\|(?=[\u3400-\u9fff\uf900-\ufaff])/g;
@@ -203,14 +208,22 @@ function loadFrequency(text, kind = "auto") {
 /* Replace each record's priority with its frequency rank, taken from either script's form of
  * the word (twins, from CC-CEDICT): the lists are written in one script, and the device
  * segments a traditional book with the traditional records. */
-function applyFrequency(records, priorities, twins) {
+function applyFrequency(records, priorities, twins, shares) {
   if (!priorities || !priorities.size) return records;
   twins = twins || new Map();
+  shares = shares || new Map();
   return records.map((r) => {
     const word = r.word !== undefined ? r.word : zhDecoder.decode(r.hw);
     // The larger of the two forms' ranks: jieba's list is simplified but carries a few stray
     // traditional characters with tiny counts (說 3, 這 7), which must not outrank 说 and 这.
-    const p = Math.max(priorities.get(word) || 0, priorities.get(twins.get(word) || "") || 0) || UNRANKED_PRIORITY;
+    // A simplified form that stands for several traditional ones (干: 乾, 幹, 干) has its
+    // count split between them, as if each were that many times rarer.
+    let borrowed = priorities.get(twins.get(word) || "") || 0;
+    const share = shares.get(word) || 1;
+    if (borrowed && share > 1) {
+      borrowed = Math.max(UNRANKED_PRIORITY + 1, borrowed - Math.round(28 * Math.log10(share)));
+    }
+    const p = Math.max(priorities.get(word) || 0, borrowed) || UNRANKED_PRIORITY;
     return { ...r, priority: p };
   });
 }
@@ -387,7 +400,10 @@ function loadCantoReadings(text) {
 /* Convert a raw CC-CEDICT (or CC-Canto) file to index records, one per traditional and
  * simplified form. Returns {records, names, entryCount, skipped, examplesDropped,
  * examplesAttached}; names is empty unless splitNames routes proper nouns into the names slot.
- * twins (a Map), when given, is filled with each form's other-script form for applyFrequency. */
+ * twins (a Map), when given, is filled with each form's other-script form for applyFrequency;
+ * shares with how many traditional forms share each one's simplified form. seen (a Set), shared
+ * across the inputs of one build, drops an entry an earlier input already held (CC-Canto
+ * repeats CC-CEDICT entries it adapted). */
 function convertCedict(text, opts = {}) {
   const zhuyin = !!opts.zhuyin;
   const splitNames = !!opts.splitNames;
@@ -395,6 +411,9 @@ function convertCedict(text, opts = {}) {
   const jyutping = opts.jyutping || new Map();
   let sentencePairs = opts.sentencePairs || null;
   const twins = opts.twins || null;
+  const shares = opts.shares || null;
+  const seen = opts.seen || null;
+  const tradsOf = new Map();  // simplified form -> its traditional forms
   const examplesScript = opts.examplesScript || "any";
 
   const parsed = [];  // {trad, simp, pinyin, canto, glosses}
@@ -405,8 +424,13 @@ function convertCedict(text, opts = {}) {
     const m = CEDICT_LINE_RE.exec(line);
     if (!m) { skipped++; continue; }
     const [, trad, simp, pinyin, canto, body] = m;
-    const idx = parsed.length;
     const glosses = splitCedictGlosses(body);
+    if (seen) {
+      const key = JSON.stringify([trad, simp, pinyin.toLowerCase(), glosses]);
+      if (seen.has(key)) { skipped++; continue; }
+      seen.add(key);
+    }
+    const idx = parsed.length;
     parsed.push({ trad, simp, pinyin, canto: canto || "", glosses });
     // Examples go to the everyday entry of a form: 周 the week over the surname, and among
     // lowercase readings the one with more senses (東西 "thing" over "east and west").
@@ -420,6 +444,16 @@ function convertCedict(text, opts = {}) {
     if (twins && trad !== simp) {
       if (!twins.has(trad)) twins.set(trad, simp);
       if (!twins.has(simp)) twins.set(simp, trad);
+      if (!tradsOf.has(simp)) tradsOf.set(simp, new Set());
+      tradsOf.get(simp).add(trad);
+    }
+  }
+  if (shares) {
+    const tradForms = new Set(parsed.map((e) => e.trad));
+    for (const [simp, trads] of tradsOf) {
+      // 干 is also a traditional character of its own, a third claim on the count.
+      const claims = trads.size + (tradForms.has(simp) && !trads.has(simp) ? 1 : 0);
+      for (const trad of trads) shares.set(trad, Math.max(shares.get(trad) || 1, claims));
     }
   }
   let examplesDropped = 0;
@@ -455,9 +489,16 @@ function convertCedict(text, opts = {}) {
     for (const hw of hws) {
       const hwBytes = zhEncoder.encode(hw);
       if (hwBytes.length >= ZH_HEADWORD_SIZE) { skipped++; continue; }
-      target.push({ hw: hwBytes, def, priority: 100, posFlags: POS_OTHER_ZH, word: hw });
+      // The everyday entry of a form goes first (周 the week before the surname): records
+      // sharing a headword keep this order on the device when their priorities tie.
+      target.push({ hw: hwBytes, def, priority: 100, posFlags: POS_OTHER_ZH, word: hw, later: forms.get(hw) !== idx });
     }
   });
+  for (const out of [records, names]) {
+    const sorted = out.map((r, i) => ({ r, i })).sort((a, b) => a.r.later - b.r.later || a.i - b.i);
+    out.length = 0;
+    for (const { r } of sorted) { delete r.later; out.push(r); }
+  }
   const examplesAttached = examples ? examples.filter((e) => e.length).length : 0;
   return { records, names, entryCount: parsed.length, skipped, examplesDropped, examplesAttached };
 }

@@ -163,6 +163,10 @@ Adds readings above the text of an EPUB, the way the reader shows a book's own r
 Furigana or Pinyin / Zhuyin toggle to hide them. Existing ruby, scripts, styles and the head are
 left alone.
 
+Pinyin is written as spoken: 一 and 不 change tone before the next syllable (一个 yí gè, 不是
+bú shì), particles such as 了, 着 and 得 take the neutral tone, and 儿 joins the syllable before it
+(哪儿 nǎr). **Dictionary tones only** keeps each character's own tone instead.
+
 | | Dictionary | AI (Gemini) |
 |---|---|---|
 | **Chinese** — `tools/pinyin_ruby/add_pinyin_ruby.py` | Longest-match segmentation against CC-CEDICT (a built-in copy, or your own file), one `<rt>` per character, the everyday reading of a word over a surname's. Nothing leaves the device. | `--ai`: Gemini reads each sentence and picks the reading meant there (石 *shí* or *dàn*); a reading is used only when CC-CEDICT lists it for that character. |

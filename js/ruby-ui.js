@@ -112,6 +112,7 @@ async function runRuby() {
       logLine(`Skipping the ${skip.size.toLocaleString()} commonest words`);
     }
     const zhuyin = $("ruby-zhuyin").checked;
+    const citation = $("ruby-citation").checked;
     suffix = zhuyin ? "-zhuyin.epub" : "-pinyin.epub";
     annotate = async (name, doc) => {
       docLabel = name;
@@ -123,7 +124,7 @@ async function runRuby() {
         for (const m of contextual.values()) n += m.size;
         logLine(`  ${name}: ${n.toLocaleString()} readings confirmed in context`);
       }
-      return annotateXhtml(doc, words, skip, zhuyin, contextual);
+      return annotateXhtml(doc, words, skip, zhuyin, contextual, citation);
     };
     const result = await rewriteEpub(epubBytes, annotate, (done, total, name) => setProgress(done, total, `Annotated ${done}/${total}: ${name}`));
     finish(result, epubFile, suffix, "");

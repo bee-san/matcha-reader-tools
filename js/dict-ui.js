@@ -212,6 +212,8 @@ async function readChineseOptions(settings) {
     jyutping: new Map(),
     sentencePairs: null,
     twins: new Map(),
+    shares: new Map(),  // traditional forms sharing one simplified form, for applyFrequency
+    seen: new Set(),    // CC-CEDICT entries already converted from an earlier input
     bilingualHeadwords: new Set(),  // what CC-CEDICT left in the vocabulary; see keepNamesTogether
     examplesScript: settings.examplesScript,
     frequency: null,
@@ -304,8 +306,8 @@ async function runDictConversion() {
         ({ records, names: nameRecords } = keepNamesTogether(records, nameRecords, zhOpts.bilingualHeadwords));
       }
       if (zhOpts.frequency && zhOpts.frequency.size) {
-        records = applyFrequency(records, zhOpts.frequency, zhOpts.twins);
-        nameRecords = applyFrequency(nameRecords, zhOpts.frequency, zhOpts.twins);
+        records = applyFrequency(records, zhOpts.frequency, zhOpts.twins, zhOpts.shares);
+        nameRecords = applyFrequency(nameRecords, zhOpts.frequency, zhOpts.twins, zhOpts.shares);
       }
       title = zhOpts.title || joinDictTitles(titles);
       // Proper nouns go to their own files only beside the vocab slot; written into another

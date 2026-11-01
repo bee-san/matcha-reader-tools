@@ -24,8 +24,16 @@ function normalizeSyllable(syl) {
   return syl;
 }
 
+// Particles whose own entry lists a full-tone reading first (着 zhāo, 得 dé), but which in running
+// text, standing alone, are almost always read in the neutral tone.
+const NEUTRAL_PARTICLES = {
+  "了": "le5", "着": "zhe5", "著": "zhe5", "得": "de5", "的": "de5", "么": "me5", "麼": "me5",
+  "们": "men5", "們": "men5", "吗": "ma5", "嗎": "ma5", "呢": "ne5", "吧": "ba5",
+};
+
 /* Map(headword -> [syllable, ...]) for both scripts; the everyday reading of a word wins over a
- * surname's or a place's (長 cháng, not Zhǎng). charReadings, when given (a Map), collects every
+ * surname's or a place's (長 cháng, not Zhǎng), and among everyday readings the one with more
+ * senses (東西 dōngxi "thing"). charReadings, when given (a Map), collects every
  * reading CC-CEDICT has for each character, in any word: char -> Set("shi2", "dan4"). It is what
  * a model's answer is checked against. */
 function loadCedictReadings(text, charReadings = null) {
@@ -47,10 +55,14 @@ function loadCedictReadings(text, charReadings = null) {
         }
       }
     }
+    const senses = m[5].split("/").length;
     for (const hw of [trad, simp]) {
       const held = words.get(hw);
-      if (held === undefined || (!proper && held.proper)) words.set(hw, { syllables, proper });
+      if (held === undefined || (!proper && (held.proper || senses > held.senses))) words.set(hw, { syllables, proper, senses });
     }
+  }
+  for (const [ch, syl] of Object.entries(NEUTRAL_PARTICLES)) {
+    if (words.has(ch)) words.set(ch, { syllables: [syl] });
   }
   const out = new Map();
   for (const [hw, held] of words) out.set(hw, held.syllables);
@@ -126,20 +138,49 @@ function* segmentForRuby(chars, words) {
   }
 }
 
+function sylTone(syl) { return syl && /\d/.test(syl[syl.length - 1]) ? parseInt(syl[syl.length - 1], 10) : 5; }
+
+const SANDHI_NUMERALS = new Set(Array.from("〇零一二三四五六七八九十百千万萬亿億两兩第"));
+
+/* readings: one syllable or null per character of chars. 一 and 不 take the tone they are spoken
+ * with before the next syllable: 4th -> 2nd for both, else 一 -> 4th. 一 keeps its 1st tone as a
+ * number (第一, 十一, 一 alone or last, before another numeral). */
+function spokenTones(chars, readings) {
+  const out = readings.slice();
+  for (let i = 0; i < readings.length; i++) {
+    const syl = readings[i];
+    if (syl === null || i + 1 >= chars.length || readings[i + 1] === null) continue;
+    const ch = chars[i], after = readings[i + 1];
+    if (ch === "不" && syl.toLowerCase() === "bu4" && sylTone(after) === 4) {
+      out[i] = "bu2";
+    } else if (ch === "一" && syl.toLowerCase() === "yi1" && !SANDHI_NUMERALS.has(chars[i + 1])
+               && (i === 0 || !SANDHI_NUMERALS.has(chars[i - 1]))) {
+      out[i] = sylTone(after) === 4 ? "yi2" : "yi4";
+    }
+  }
+  return out;
+}
+
 function rubyFor(chunk, syllables, zhuyin) {
   const chars = Array.from(chunk);
-  const parts = [];
+  const groups = [];  // [characters, reading]
   for (let i = 0; i < Math.min(chars.length, syllables.length); i++) {
     const syl = syllables[i].toLowerCase();  // CC-CEDICT capitalises proper nouns; ruby does not
     const reading = zhuyin ? pinyinSyllableToZhuyin(syl) : pinyinSyllableToMarks(syl);
-    parts.push(`<ruby>${htmlEscape(chars[i])}<rt>${htmlEscape(reading)}</rt></ruby>`);
+    if (syl === "r5" && (chars[i] === "儿" || chars[i] === "兒") && groups.length && !zhuyin) {
+      groups[groups.length - 1][0] += chars[i];  // erhua: 哪儿 under one nǎr
+      groups[groups.length - 1][1] += "r";
+      continue;
+    }
+    groups.push([chars[i], reading]);
   }
-  return parts.join("");
+  return groups.map(([c, r]) => `<ruby>${htmlEscape(c)}<rt>${htmlEscape(r)}</rt></ruby>`).join("");
 }
 
 /* Annotate one XHTML document. skip: Set of words to leave bare. contextual: the Map from
- * contextualReadings(), overriding the dictionary's reading character by character. */
-function annotateXhtml(doc, words, skip, zhuyin, contextual = null) {
+ * contextualReadings(), overriding the dictionary's reading character by character. citation
+ * keeps dictionary tones (no 一/不 sandhi). */
+function annotateXhtml(doc, words, skip, zhuyin, contextual = null, citation = false) {
   const out = [];
   for (const [piece, isText] of textPieces(doc)) {
     if (!isText) {
@@ -152,19 +193,33 @@ function annotateXhtml(doc, words, skip, zhuyin, contextual = null) {
       continue;
     }
     const override = (contextual && contextual.get(text)) || new Map();
+    const chars = Array.from(text);
+    const chunks = [...segmentForRuby(chars, words)];
+    // One reading per character first, so a tone change can look at the next word.
+    let readings = [];
+    for (const [chunk, syllables] of chunks) {
+      const len = Array.from(chunk).length;
+      for (let k = 0; k < len; k++) {
+        const pos = readings.length;
+        readings.push(override.has(pos) ? override.get(pos) : (syllables ? syllables[k] : null));
+      }
+    }
+    // 地 after a doubled adjective is the adverb marker: 慢慢地 mànmàn de, not dì.
+    for (let i = 2; i < chars.length; i++) {
+      if (chars[i] === "地" && chars[i - 1] === chars[i - 2] && PINYIN_HAN.test(chars[i - 1]) && readings[i] === "di4") {
+        readings[i] = "de5";
+      }
+    }
+    if (!citation) readings = spokenTones(chars, readings);
     const built = [];
     let offset = 0;
-    for (const [chunk, syllables] of segmentForRuby(Array.from(text), words)) {
+    for (const [chunk] of chunks) {
       const len = Array.from(chunk).length;
-      let overridden = false;
-      for (let k = 0; k < len; k++) if (override.has(offset + k)) { overridden = true; break; }
-      if (skip.has(chunk) || (syllables === null && !overridden)) {
+      const mine = readings.slice(offset, offset + len);
+      if (skip.has(chunk) || mine.some((r) => r === null)) {
         built.push(htmlEscape(chunk, false));
-      } else if (syllables === null) {
-        // A character the dictionary has no word for here, which the model read.
-        built.push(rubyFor(chunk, [override.get(offset)], zhuyin));
       } else {
-        built.push(rubyFor(chunk, syllables.map((syl, k) => (override.has(offset + k) ? override.get(offset + k) : syl)), zhuyin));
+        built.push(rubyFor(chunk, mine, zhuyin));
       }
       offset += len;
     }
@@ -181,7 +236,7 @@ function topWords(priorities, n) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    PINYIN_AI_PROMPT, normalizeSyllable, loadCedictReadings, contextualReadings, segmentForRuby, rubyFor,
-    annotateXhtml, topWords,
+    PINYIN_AI_PROMPT, normalizeSyllable, loadCedictReadings, contextualReadings, segmentForRuby, spokenTones,
+    rubyFor, annotateXhtml, topWords,
   };
 }
