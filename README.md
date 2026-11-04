@@ -1,5 +1,7 @@
 # 🍵 Matcha Reader Tools
 
+[![Discord](https://img.shields.io/discord/754001738184392704?logo=discord&label=Discord)](https://discord.skerritt.blog)
+
 > bee-san's fork. It adds **mokuro volumes** as a manga input (choose a mokuro series `.zip` or a
 > folder, pick a volume) and a choice of who reads the text: mokuro's own, **PP-OCR manga** in the
 > browser, **Screen AI** (Chrome's on-device OCR) through a local helper, or Gemini.
