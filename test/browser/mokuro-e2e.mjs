@@ -2,7 +2,7 @@
  * carries mokuro's text and line boxes. Not part of e2e.mjs: it needs a real mokuro archive,
  * which cannot be committed.
  *
- *   node test/browser/mokuro-e2e.mjs path/to/Series.zip [volume-index] [max-pages]
+ *   node test/browser/mokuro-e2e.mjs path/to/Series.zip|path/to/folder [volume-index] [max-pages]
  *
  * The default reads the text with PP-OCR; OCR=mokuro takes mokuro's own, OCR=screenai uses the
  * Screen AI helper (start `python3 tools/manga_convert/screenai.py --serve` in the firmware repo).
@@ -42,7 +42,9 @@ const page = await (await browser.newContext({ acceptDownloads: true })).newPage
 page.on("pageerror", (e) => console.error("page error:", e.message));
 await page.goto(`${base}/manga.html`);
 await page.$$eval("details", (ds) => ds.forEach((d) => { d.open = true; }));
-await page.setInputFiles("#manga-file", archive);
+// A series archive goes through the file picker, a folder through the folder picker.
+if (fs.statSync(archive).isDirectory()) await page.setInputFiles("#manga-folder", archive);
+else await page.setInputFiles("#manga-file", archive);
 await page.waitForSelector("#mokuro-volume-row:not([hidden])", { timeout: 60000 });
 const volumes = await page.$$eval("#mokuro-volume option", (os) => os.map((o) => o.textContent));
 check("volume picker lists the archive's volumes", volumes.length > 0, String(volumes.length));

@@ -140,6 +140,12 @@ function mokuroStem(path) {
   return base.slice(0, base.length - MOKURO_SUFFIX.length);
 }
 
+/* Folder names a volume's images may sit in: the file's own stem, and for "<volume>.mo.mokuro" (as
+ * some mokuro setups name it) also "<volume>". */
+function mokuroImageDirs(stem) {
+  return stem.endsWith(".mo") ? [stem, stem.slice(0, -3)] : [stem];
+}
+
 /* Volumes in an archive, in natural order: [{ name, member }]. */
 function mokuroVolumesInZip(entries) {
   const members = entries
@@ -332,10 +338,14 @@ function mokuroPages(data, readImage, sourceLabel) {
 /* One volume of a series archive: its .mokuro member and the `<volume>/` folder beside it. */
 async function collectFromMokuroZip(zip, volume) {
   const data = parseMokuro(new TextDecoder().decode(await zip.read(zip.find(volume.member))));
-  const prefix = volume.member.slice(0, volume.member.length - MOKURO_SUFFIX.length) + "/";
+  const base = volume.member.slice(0, volume.member.length - MOKURO_SUFFIX.length);
   const byPath = new Map();
-  for (const e of zip.entries) {
-    if (!e.isDir && e.name.startsWith(prefix)) byPath.set(e.name.slice(prefix.length), e);
+  for (const dir of mokuroImageDirs(base)) {
+    const prefix = dir + "/";
+    for (const e of zip.entries) {
+      if (!e.isDir && e.name.startsWith(prefix)) byPath.set(e.name.slice(prefix.length), e);
+    }
+    if (byPath.size) break;
   }
   return mokuroPages(data, (rel) => {
     const entry = byPath.get(rel);
@@ -347,14 +357,16 @@ async function collectFromMokuroZip(zip, volume) {
  * together). Images match by their path under the volume folder, then by file name. */
 async function collectFromMokuroFiles(files, mokuroFile) {
   const data = parseMokuro(await mokuroFile.text());
-  const stem = mokuroStem(mokuroFile.webkitRelativePath || mokuroFile.name);
+  const dirs = mokuroImageDirs(mokuroStem(mokuroFile.webkitRelativePath || mokuroFile.name));
   const byRel = new Map();
   const byBase = new Map();
   for (const f of files) {
     if (!mokuroDep("isImageName")(f.name)) continue;
     const rel = (f.webkitRelativePath || f.name).replace(/\\/g, "/");
-    const at = rel.indexOf(`${stem}/`);
-    if (at >= 0) byRel.set(rel.slice(at + stem.length + 1), f);
+    for (const dir of dirs) {
+      const at = rel.indexOf(`${dir}/`);
+      if (at >= 0 && !byRel.has(rel.slice(at + dir.length + 1))) byRel.set(rel.slice(at + dir.length + 1), f);
+    }
     byBase.set(f.name, f);
   }
   return mokuroPages(data, (rel) => {

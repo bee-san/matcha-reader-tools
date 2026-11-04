@@ -1181,8 +1181,8 @@ function splitIntoBooks(files) {
 }
 
 async function runMangaConversion() {
-  const fileInput = $("manga-file");
-  const files = fileInput.files;
+  // The file picker or the folder picker, whichever was used last.
+  const files = chosenFiles();
   if (!files || !files.length) {
     logValidation("Choose a .cbz/.zip/.epub file or a set of page images first.");
     return;
