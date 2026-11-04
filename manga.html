@@ -267,6 +267,7 @@
     <p class="hint">Reading the text is what makes dictionary lookup work on the device.</p>
     <div class="pills" role="radiogroup" aria-label="Text recognition">
       <label class="pill" id="ocr-engine-mokuro" hidden><input type="radio" name="ocr-engine" value="mokuro"><span>mokuro's own text</span></label>
+      <label class="pill"><input type="radio" name="ocr-engine" value="ppocr"><span>PP-OCR manga, in this browser</span></label>
       <label class="pill"><input type="radio" name="ocr-engine" value="screenai"><span>Screen AI on this computer</span></label>
       <label class="pill"><input type="radio" name="ocr-engine" value="gemini"><span>Gemini</span></label>
       <label class="pill"><input type="radio" name="ocr-engine" value="none"><span>Skip</span></label>
@@ -275,6 +276,10 @@
     <input type="checkbox" id="manga-no-ocr" checked hidden>
     <p class="hint" id="ocr-hint-mokuro" hidden>The volume's own text from mokuro, with every line's position. Fast, and
     nothing leaves the browser. mokuro's reader (manga-ocr) can confuse small kana; Screen AI reads them better.</p>
+    <p class="hint" id="ocr-hint-ppocr" hidden><a href="https://huggingface.co/Kellenok/PP-OCRv6_manga">PP-OCRv6_manga</a>,
+    a small OCR model trained on manga, reads Japanese and Chinese right here in the browser, punctuation and small
+    kana included, with each line's position for word lookup. The first use downloads 12 MB. Nothing leaves the
+    browser. About 2–3 seconds a page. No translations.</p>
     <p class="hint" id="ocr-hint-none" hidden>Finds the panels but doesn't read the text. Without it, dictionary lookup
     and translations on the device are off.</p>
     <div id="manga-screenai-fields" hidden>
@@ -487,6 +492,7 @@
 <script src="js/manga-epub.js"></script>
 <script src="js/manga-pdf.js"></script>
 <script src="js/yolo.js"></script>
+<script src="js/ppocr.js"></script>
 <script src="js/manga-ui.js"></script>
 </body>
 </html>

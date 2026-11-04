@@ -4,8 +4,8 @@
  *
  *   node test/browser/mokuro-e2e.mjs path/to/Series.zip [volume-index] [max-pages]
  *
- * With SCREENAI=1 the text is read by the Screen AI helper instead of taken from mokuro; start it
- * first with `python3 tools/manga_convert/screenai.py --serve` in the firmware repo.
+ * OCR=ppocr reads the text with PP-OCR in the page instead of taking mokuro's; OCR=screenai uses the
+ * Screen AI helper (start `python3 tools/manga_convert/screenai.py --serve` in the firmware repo).
  */
 import { chromium } from "playwright";
 import fs from "fs";
@@ -47,10 +47,13 @@ await page.waitForSelector("#mokuro-volume-row:not([hidden])", { timeout: 60000 
 const volumes = await page.$$eval("#mokuro-volume option", (os) => os.map((o) => o.textContent));
 check("volume picker lists the archive's volumes", volumes.length > 0, String(volumes.length));
 check("mokuro's own text is offered and picked", await page.isChecked('input[name="ocr-engine"][value="mokuro"]'));
-if (process.env.SCREENAI) {
+const OCR = process.env.OCR || "";
+if (OCR === "screenai") {
   await page.check('input[name="ocr-engine"][value="screenai"]');
   await page.waitForFunction(() => /ready/.test(document.querySelector("#screenai-status").textContent), null, { timeout: 10000 });
   check("Screen AI helper found", true);
+} else if (OCR === "ppocr") {
+  await page.check('input[name="ocr-engine"][value="ppocr"]');
 }
 await page.selectOption("#mokuro-volume", volumeArg);
 await page.check('input[name="booktype"][value="manga"]');
@@ -93,7 +96,7 @@ console.log(`  ${pages} pages, ${blocks} text blocks, ${withLines} with line box
 check("text blocks carried over from mokuro", blocks > 0);
 // Older mokuro output has no lines_coords (those blocks fall back to whole-block lookup); Screen AI
 // always gives each line's box.
-if (process.env.SCREENAI) check("every block has line boxes for word selection", withLines === blocks, `${withLines}/${blocks}`);
+if (OCR) check("every block has line boxes for word selection", withLines === blocks, `${withLines}/${blocks}`);
 check("ellipses folded to one cell", fullwidthDots === 0);
 const meta = fs.readFileSync(path.join(dir, "meta.bin"));
 check("meta.bin carries the language", meta.includes(Buffer.from("ja")));

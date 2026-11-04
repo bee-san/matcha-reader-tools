@@ -677,7 +677,14 @@ function applyBookTypeUi() {
 /* The key field and the language pickers are only meaningful when Gemini will be called,
  * so they appear when text recognition is switched on rather than sitting there greyed. */
 /* ── Text recognition: mokuro's own text, Screen AI through the local helper, Gemini, or none ── */
-const OCR_ENGINES = ["mokuro", "screenai", "gemini", "none"];
+const OCR_ENGINES = ["mokuro", "ppocr", "screenai", "gemini", "none"];
+
+/* ONNX Runtime Web, shared by panel detection and PP-OCR. */
+async function loadOrtRuntime() {
+  if (typeof ort === "undefined") await loadScriptOnce(ORT_DIR + "ort.wasm.min.js");
+  // Must be absolute: ort dynamic-import()s its .mjs loader.
+  ort.env.wasm.wasmPaths = new URL(ORT_DIR, location.href).href;
+}
 const SCREENAI_HELPER = "http://127.0.0.1:7393";
 
 function ocrEngine() {
@@ -738,6 +745,7 @@ function applyOcrUi() {
   $("manga-screenai-fields").hidden = engine !== "screenai";
   $("ocr-hint-mokuro").hidden = engine !== "mokuro";
   $("ocr-hint-none").hidden = engine !== "none";
+  $("ocr-hint-ppocr").hidden = engine !== "ppocr";
   if (engine === "screenai") showScreenaiStatus();
 }
 
@@ -936,6 +944,11 @@ async function preparePage(page, o) {
   const srcBytes = await page.read();
   let ext = mangaFileExt(page.name);
   let bitmap = await decodeImage(srcBytes, ext);
+  // Whole-page text, as a mokuro page record measured on this source image (before any margin
+  // trim), so every source maps through the same trim and downscale as mokuro's own.
+  const textRecord = o.textSource === "ppocr" ? await ppocrReadPage(await loadPpocr(loadOrtRuntime), bitmap, bitmap.width, bitmap.height)
+    : o.textSource === "screenai" ? await screenaiPage(srcBytes)
+    : o.textSource === "mokuro" ? page.mokuro || null : null;
   // The page region kept by the margin trim, in source pixels: mokuro's boxes are mapped through it.
   const sourceSize = [bitmap.width, bitmap.height];
   let cropOrigin = [0, 0];
@@ -992,10 +1005,6 @@ async function preparePage(page, o) {
 
   const rgba = ctx.getImageData(0, 0, imgW, imgH).data;
 
-  // Whole-page text, as a mokuro page record measured on the source image: Screen AI reads the
-  // file as given, so its record maps through the same trim and downscale as mokuro's.
-  const textRecord = o.textSource === "screenai" ? await screenaiPage(srcBytes)
-    : o.textSource === "mokuro" ? page.mokuro || null : null;
   const mokuroBlocks = textRecord
     ? mokuroTextBlocks(textRecord, sourceSize, cropOrigin, [origW, origH], [imgW, imgH], (m) => logLine(`  ${m}`, "warn"))
     : null;
@@ -1196,7 +1205,7 @@ async function runMangaConversion() {
   // Whole-page text that is not Gemini's: Screen AI through the local helper, or a mokuro volume's own.
   const engine = ocrEngine();
   const textSource = !(formats.has("matcha") || matchaFile) ? null
-    : engine === "screenai" ? "screenai" : engine === "mokuro" && mokuroBook ? "mokuro" : null;
+    : engine === "screenai" || engine === "ppocr" ? engine : engine === "mokuro" && mokuroBook ? "mokuro" : null;
   const mono = $("manga-mono").checked;
   const pdf = formats.has("pdf");
   // The PDF is built from the same page/panel images as the EPUB, so either one collects them.
@@ -1284,6 +1293,15 @@ async function runMangaConversion() {
   if (textSource === "mokuro" && isWebtoon) {
     logValidation("mokuro's text belongs to the volume's own pages: pick Manga, Comic or 4-koma, not Webtoon.");
     return;
+  }
+  if (textSource === "ppocr") {
+    try {
+      logLine("Loading PP-OCR…");
+      await loadPpocr(loadOrtRuntime);
+    } catch (e) {
+      logValidation(`PP-OCR could not load (${e.message}).`);
+      return;
+    }
   }
   if (textSource === "screenai" && !(await screenaiHelperRunning())) {
     logValidation("Start the Screen AI helper first: python3 tools/manga_convert/screenai.py --serve");
@@ -1877,6 +1895,7 @@ async function panelCheckTextSource() {
   const engine = ocrEngine();
   if (engine === "mokuro" && isMokuroSelection(chosenFiles())) return "mokuro";
   if (engine === "screenai" && await screenaiHelperRunning()) return "screenai";
+  if (engine === "ppocr") return "ppocr";
   return null;
 }
 

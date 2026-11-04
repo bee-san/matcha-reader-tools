@@ -30,6 +30,7 @@ const ruby = require("../../js/pinyin-ruby.js");
 const furigana = require("../../js/furigana-ruby.js");
 const manga = require("../../js/manga-core.js");
 const mokuro = require("../../js/mokuro.js");
+const ppocr = require("../../js/ppocr.js");
 const epub = require("../../js/manga-epub.js");
 
 let failures = 0;
@@ -1409,6 +1410,43 @@ async function testMokuro() {
   check("mokuro: an unfinished download is named", /never finished/.test(unfinished), unfinished);
 }
 
+
+/* PP-OCR's pre- and post-processing: sizes, DB boxes, CTC decoding and bubble grouping. */
+function testPpocr() {
+  check("ppocr: page fits 960 on the long side in multiples of 32",
+    JSON.stringify(ppocr.ppocrDetSize(888, 1238)) === JSON.stringify({ w: 704, h: 960 }));
+  const strip = ppocr.ppocrDetSize(800, 6000);
+  check("ppocr: a long strip gets a 3:4 page's pixel budget", strip.w % 32 === 0 && strip.w * strip.h < 0.8 * 960 * 960);
+
+  // A 40x40 map with one confident 4x20 vertical stroke and one faint blob.
+  const mw = 40, mh = 40, pred = new Float32Array(mw * mh);
+  for (let y = 10; y < 30; y++) for (let x = 18; x < 22; x++) pred[y * mw + x] = 0.9;
+  for (let y = 2; y < 5; y++) for (let x = 2; x < 5; x++) pred[y * mw + x] = 0.2;
+  const boxes = ppocr.ppocrDbBoxes(pred, mw, mh);
+  check("ppocr: one box for the stroke, the faint blob dropped", boxes.length === 1, JSON.stringify(boxes));
+  const [x1, y1, x2, y2] = boxes[0];
+  check("ppocr: box grown by the unclip offset", x1 < 18 && x2 > 21 && y1 < 10 && y2 > 29 && x1 > 15, JSON.stringify(boxes[0]));
+
+  const vocab = ["", "ね", "こ", " "];
+  // steps: ね ね blank こ こ → ねこ
+  const logits = new Float32Array([0, 5, 0, 0, 0, 5, 0, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 5, 0]);
+  check("ppocr: CTC collapses repeats and blanks", ppocr.ppocrCtcDecode(logits, 5, 4, vocab) === "ねこ");
+  check("ppocr: recogniser width follows the line's shape", ppocr.ppocrRecWidth(300, 48) === 300 && ppocr.ppocrRecWidth(5, 48) === 16
+    && ppocr.ppocrRecWidth(1000, 48) === 640 && ppocr.ppocrRecWidth(3000, 48) === 2400);
+
+  const blocks = ppocr.ppocrBubbles([
+    { text: "それじゃあ", box: [370, 110, 390, 200], vertical: true },
+    { text: "お別れだ", box: [347, 110, 367, 185], vertical: true },
+    { text: "019", box: [65, 1178, 119, 1188], vertical: false },
+    { text: "漢字の読み", box: [300, 300, 324, 420], vertical: true },
+    { text: "かんじ", box: [326, 300, 336, 340], vertical: true },
+  ]);
+  check("ppocr: columns of one bubble merged right to left, page number and furigana dropped",
+    blocks.length === 2 && blocks.some((b) => b.lines.join("|") === "それじゃあ|お別れだ")
+    && blocks.some((b) => b.lines.join("|") === "漢字の読み"), JSON.stringify(blocks.map((b) => b.lines)));
+  check("ppocr: blocks carry mokuro line quads", blocks.every((b) => b.lines_coords.length === b.lines.length));
+}
+
 (async () => {
   testManga();
   testMangaBookType();
@@ -1438,6 +1476,7 @@ async function testMokuro() {
   await testRubyAi();
   await testZipRoundTrip();
   await testMokuro();
+  testPpocr();
   if (failures) {
     console.error(`\n${failures} failure(s)`);
     process.exit(1);

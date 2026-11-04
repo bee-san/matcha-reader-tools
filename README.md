@@ -1,8 +1,9 @@
 # 🍵 Matcha Reader Tools
 
 > bee-san's fork. It adds **mokuro volumes** as a manga input (choose a mokuro series `.zip` or a
-> folder, pick a volume) and **Screen AI**, Chrome's on-device OCR, as a way to read the text with no
-> Gemini key. Live at <https://bee-san.github.io/matcha-reader-tools/>.
+> folder, pick a volume) and a choice of who reads the text: mokuro's own, **PP-OCR manga** in the
+> browser, **Screen AI** (Chrome's on-device OCR) through a local helper, or Gemini.
+> Live at <https://bee-san.github.io/matcha-reader-tools/>.
 
 Browser-based converters for the [Matcha Reader](https://github.com/eszter007/matcha-reader)
 e-reader firmware, a CrossPoint Reader fork with Japanese and Chinese learning features. Everything runs
@@ -20,6 +21,34 @@ to Gemini when you supply your own API key, and a book's text when you choose AI
 
 Each tool downloads a zip already laid out for the SD card: unzip it onto the card, or upload the
 files via the reader's built-in Wi-Fi web file transfer.
+
+## Choosing the text recognition
+
+Step 4 of the manga converter picks what reads the speech bubbles. Every choice but Gemini keeps the
+pages on your computer, and all of them give each printed line its position, so word lookup on the
+device lands on the right word (mokuro only when its file has line positions).
+
+| Choice | Runs | Notes |
+|---|---|---|
+| **mokuro's own text** | already in a mokuro volume | Instant. manga-ocr confuses small kana; older volumes have no line positions. |
+| **PP-OCR manga, in this browser** | ONNX Runtime Web (WASM) | 12 MB downloaded once, about 2–3 s a page. Japanese and Chinese. |
+| **Screen AI on this computer** | local helper, see below | Fast; reads small kana well, sometimes slips on `!?`. |
+| **Gemini** | Google, with your API key | Also translates each panel. |
+| **Skip** | — | Panels only, no lookup. |
+
+On two Azumanga Daiou pages checked by hand, PP-OCR got the punctuation and small kana right where
+the others slipped (`寝てばっかいただろー!?`, `おさんぽ`, `なぁー`).
+
+## PP-OCR manga
+
+[PP-OCRv6_manga](https://huggingface.co/Kellenok/PP-OCRv6_manga) by Kellenok (Apache-2.0): PaddleOCR's
+PP-OCRv6 detector and recogniser fine-tuned on manga, vendored in `models/ppocr/` (FP16 ONNX, 0.9 MB +
+10.6 MB) and run by `js/ppocr.js` with the same ONNX Runtime Web as panel detection. The pipeline follows
+the model card's reference: detector input with the long side at 960, DB post-processing
+(threshold 0.15, box threshold 0.25, unclip 1.4), each line cropped, vertical lines turned, resized to
+48 px high and CTC-decoded. Manga lettering is axis-aligned, so connected regions and their bounding
+boxes stand in for OpenCV's contours and rotated rectangles. Lines are then grouped into speech
+bubbles, with furigana, page numbers and stray marks dropped.
 
 ## Screen AI text recognition
 
