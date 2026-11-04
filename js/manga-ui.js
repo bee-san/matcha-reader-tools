@@ -369,7 +369,12 @@ function showMokuroVolumes() {
   $("mokuro-volume-row").hidden = mokuroInput.volumes.length === 0;
   $("mokuro-error").hidden = !mokuroInput.error;
   $("mokuro-error").textContent = mokuroInput.error;
-  $("card-ocr").hidden = mokuroInput.volumes.length > 0;
+  const isMokuro = mokuroInput.volumes.length > 0;
+  $("ocr-engine-mokuro").hidden = !isMokuro;
+  // A mokuro volume starts on its own text unless Screen AI is wanted; anything else falls back
+  // to the engine last used for ordinary books.
+  if (isMokuro && ocrEngine() !== "screenai") setOcrEngine("mokuro");
+  else if (!isMokuro && ocrEngine() === "mokuro") setOcrEngine(savedOcrEngine());
   updateRunSummary();
 }
 
@@ -671,9 +676,69 @@ function applyBookTypeUi() {
 
 /* The key field and the language pickers are only meaningful when Gemini will be called,
  * so they appear when text recognition is switched on rather than sitting there greyed. */
+/* ── Text recognition: mokuro's own text, Screen AI through the local helper, Gemini, or none ── */
+const OCR_ENGINES = ["mokuro", "screenai", "gemini", "none"];
+const SCREENAI_HELPER = "http://127.0.0.1:7393";
+
+function ocrEngine() {
+  const picked = document.querySelector('input[name="ocr-engine"]:checked');
+  return picked ? picked.value : "none";
+}
+
+function setOcrEngine(value) {
+  const radio = document.querySelector(`input[name="ocr-engine"][value="${value}"]`);
+  if (radio) radio.checked = true;
+  // Everything but Gemini is "no Gemini" to the conversion.
+  $("manga-no-ocr").checked = value !== "gemini";
+  applyOcrUi();
+}
+
+/* The engine the user picked last for books that are not mokuro volumes. */
+function savedOcrEngine() {
+  const saved = loadSetting("manga-ocr-engine", "");
+  if (OCR_ENGINES.includes(saved) && saved !== "mokuro") return saved;
+  return loadSetting("manga-no-ocr", "1") === "1" ? "none" : "gemini";
+}
+
+async function screenaiHelperRunning() {
+  try {
+    const resp = await fetch(`${SCREENAI_HELPER}/status`, { signal: AbortSignal.timeout(2000) });
+    return resp.ok && (await resp.json()).engine === "screenai";
+  } catch (e) {
+    return false;
+  }
+}
+
+/* One page read by the helper, as a mokuro page record measured on the image sent. */
+async function screenaiPage(bytes) {
+  let resp;
+  try {
+    resp = await fetch(`${SCREENAI_HELPER}/page`, {
+      method: "POST", body: bytes, headers: { "Content-Type": "application/octet-stream" },
+    });
+  } catch (e) {
+    throw new Error("the Screen AI helper stopped answering; is it still running?");
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(`Screen AI: ${data.error || resp.status}`);
+  return data;
+}
+
+async function showScreenaiStatus() {
+  const el = $("screenai-status");
+  el.textContent = "Looking for the helper…";
+  el.textContent = await screenaiHelperRunning()
+    ? "Helper found: Screen AI is ready."
+    : "The helper is not running yet. Start it with the command above, then convert.";
+}
+
 function applyOcrUi() {
-  const fields = $("manga-ocr-fields");
-  if (fields) fields.hidden = $("manga-no-ocr").checked;
+  const engine = ocrEngine();
+  $("manga-ocr-fields").hidden = engine !== "gemini";
+  $("manga-screenai-fields").hidden = engine !== "screenai";
+  $("ocr-hint-mokuro").hidden = engine !== "mokuro";
+  $("ocr-hint-none").hidden = engine !== "none";
+  if (engine === "screenai") showScreenaiStatus();
 }
 
 const mangaState = { running: false, cancelled: false };
@@ -927,8 +992,12 @@ async function preparePage(page, o) {
 
   const rgba = ctx.getImageData(0, 0, imgW, imgH).data;
 
-  const mokuroBlocks = page.mokuro
-    ? mokuroTextBlocks(page.mokuro, sourceSize, cropOrigin, [origW, origH], [imgW, imgH], (m) => logLine(`  ${m}`, "warn"))
+  // Whole-page text, as a mokuro page record measured on the source image: Screen AI reads the
+  // file as given, so its record maps through the same trim and downscale as mokuro's.
+  const textRecord = o.textSource === "screenai" ? await screenaiPage(srcBytes)
+    : o.textSource === "mokuro" ? page.mokuro || null : null;
+  const mokuroBlocks = textRecord
+    ? mokuroTextBlocks(textRecord, sourceSize, cropOrigin, [origW, origH], [imgW, imgH], (m) => logLine(`  ${m}`, "warn"))
     : null;
   let boxes = null;
   let frames = null;
@@ -1122,9 +1191,12 @@ async function runMangaConversion() {
   // output that would be discarded. (The OCR section is hidden in that case too.)
   const matchaFile = formats.has("matchafile");
   await mokuroInput.ready;
-  // A mokuro volume brings its own text, so Gemini is never asked.
   const mokuroBook = isMokuroSelection(chosenFiles());
-  const noOcr = $("manga-no-ocr").checked || mokuroBook || !(formats.has("matcha") || matchaFile);
+  const noOcr = $("manga-no-ocr").checked || !(formats.has("matcha") || matchaFile);
+  // Whole-page text that is not Gemini's: Screen AI through the local helper, or a mokuro volume's own.
+  const engine = ocrEngine();
+  const textSource = !(formats.has("matcha") || matchaFile) ? null
+    : engine === "screenai" ? "screenai" : engine === "mokuro" && mokuroBook ? "mokuro" : null;
   const mono = $("manga-mono").checked;
   const pdf = formats.has("pdf");
   // The PDF is built from the same page/panel images as the EPUB, so either one collects them.
@@ -1209,8 +1281,12 @@ async function runMangaConversion() {
 
   const apiKey = $("manga-key").value.trim();
   const model = $("manga-model").value.trim() || GEMINI_DEFAULT_MODEL;
-  if (mokuroBook && isWebtoon) {
-    logValidation("A mokuro volume keeps its own pages: pick Manga, Comic or 4-koma, not Webtoon.");
+  if (textSource === "mokuro" && isWebtoon) {
+    logValidation("mokuro's text belongs to the volume's own pages: pick Manga, Comic or 4-koma, not Webtoon.");
+    return;
+  }
+  if (textSource === "screenai" && !(await screenaiHelperRunning())) {
+    logValidation("Start the Screen AI helper first: python3 tools/manga_convert/screenai.py --serve");
     return;
   }
   if (!noOcr && !apiKey) {
@@ -1328,7 +1404,7 @@ async function runMangaConversion() {
           logLine(`Could not load the AI panel detector (${e.message}); using the grid heuristic.`, "warn");
         }
       }
-      const pageOpts = { trimMargins, deviceTarget, cleanup, cleanupOn, isWebtoon, yolo, rtl, columnMajor };
+      const pageOpts = { trimMargins, deviceTarget, cleanup, cleanupOn, isWebtoon, yolo, rtl, columnMajor, textSource };
 
       // What the user typed wins, then the book's own metadata, then a guess from the file name.
       const fileMeta = fileNameMeta(files);
@@ -1680,7 +1756,7 @@ async function runMangaConversion() {
 
       setProgress(pagesDone, pages.length, "Packaging…");
       const summary = `Done: ${pagesDone} pages, ${totalPanels} panels` +
-        (noOcr && !mokuroBook ? "" : `, ${totalTextBlocks} text blocks`) +
+        (noOcr && !textSource ? "" : `, ${totalTextBlocks} text blocks`) +
         (deviceTarget ? `, ${deviceTarget[0]}×${deviceTarget[1]}` : "") +
         (mono && matchaFolder ? ", 1-bit dithered BMP" : "") +
         (pagesKeptForCoverage ? `, ${pagesKeptForCoverage} full page(s) kept where panels missed content` : "");
@@ -1791,7 +1867,17 @@ async function panelCheckSettings() {
     cleanupOn: cleanup.levels || cleanup.contrast !== "off" || cleanup.sharpen,
     isWebtoon: false, yolo, rtl: bookType === BOOK_MANGA || bookType === BOOK_YONKOMA,
     columnMajor: bookType === BOOK_YONKOMA || bookType === BOOK_YONKOMA_LTR,
+    // The same text the conversion will use, since bubbles grow the panel crops.
+    textSource: await panelCheckTextSource(),
   };
+}
+
+async function panelCheckTextSource() {
+  await mokuroInput.ready;
+  const engine = ocrEngine();
+  if (engine === "mokuro" && isMokuroSelection(chosenFiles())) return "mokuro";
+  if (engine === "screenai" && await screenaiHelperRunning()) return "screenai";
+  return null;
 }
 
 /* Why a page is worth a look, or "" when detection looks fine. */
@@ -2364,7 +2450,14 @@ if (typeof document !== "undefined" && document.getElementById("manga-run")) {
   // Skip text recognition is the default: it needs no API key, sends nothing anywhere and
   // is the fast path, so the key field and the language pickers only appear once someone
   // asks for OCR by unticking it.
-  $("manga-no-ocr").checked = loadSetting("manga-no-ocr", "1") === "1";
+  setOcrEngine(savedOcrEngine());
+  for (const r of document.querySelectorAll('input[name="ocr-engine"]')) {
+    r.addEventListener("change", () => {
+      setOcrEngine(r.value);
+      if (r.value !== "mokuro") saveSetting("manga-ocr-engine", r.value);
+      clearValidationWarnings();
+    });
+  }
   applyBookTypeUi();
   applyOcrUi();
   $("manga-res").value = validResChoice(loadSetting("manga-res", ""));

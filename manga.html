@@ -263,12 +263,27 @@
   </div>
 
   <div class="card" id="card-ocr">
-    <h3>4. Text recognition (Gemini)</h3>
-    <div class="checks stacked">
-      <label><input type="checkbox" id="manga-no-ocr" checked> <span class="opt">Skip text recognition</span>
-        <span class="hint">Finds the panels but doesn't read the text. No API key, nothing leaves
-        the browser, much faster. Without it, dictionary lookup and translations on the device are off.
-        Untick to have Gemini read each panel.</span></label>
+    <h3>4. Text recognition</h3>
+    <p class="hint">Reading the text is what makes dictionary lookup work on the device.</p>
+    <div class="pills" role="radiogroup" aria-label="Text recognition">
+      <label class="pill" id="ocr-engine-mokuro" hidden><input type="radio" name="ocr-engine" value="mokuro"><span>mokuro's own text</span></label>
+      <label class="pill"><input type="radio" name="ocr-engine" value="screenai"><span>Screen AI on this computer</span></label>
+      <label class="pill"><input type="radio" name="ocr-engine" value="gemini"><span>Gemini</span></label>
+      <label class="pill"><input type="radio" name="ocr-engine" value="none"><span>Skip</span></label>
+    </div>
+    <!-- Driven by the choice above; the conversion reads it as "no Gemini". -->
+    <input type="checkbox" id="manga-no-ocr" checked hidden>
+    <p class="hint" id="ocr-hint-mokuro" hidden>The volume's own text from mokuro, with every line's position. Fast, and
+    nothing leaves the browser. mokuro's reader (manga-ocr) can confuse small kana; Screen AI reads them better.</p>
+    <p class="hint" id="ocr-hint-none" hidden>Finds the panels but doesn't read the text. Without it, dictionary lookup
+    and translations on the device are off.</p>
+    <div id="manga-screenai-fields" hidden>
+      <p class="hint">Chrome's on-device OCR, the one it uses for accessibility, reads every page: small kana
+      included, with each line's position for word lookup. It runs on this computer through a small helper from
+      the Matcha Reader repo, started with<br><code>python3 tools/manga_convert/screenai.py --serve</code><br>
+      The first start downloads the library from Chromium. Pages go to the helper only, never to the internet.
+      No translations. Your browser may ask to let this page reach apps on your device: allow it.</p>
+      <p class="hint" id="screenai-status" role="status"></p>
     </div>
 
     <div id="manga-ocr-fields" hidden>

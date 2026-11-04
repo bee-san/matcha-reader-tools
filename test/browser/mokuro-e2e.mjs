@@ -3,6 +3,9 @@
  * which cannot be committed.
  *
  *   node test/browser/mokuro-e2e.mjs path/to/Series.zip [volume-index] [max-pages]
+ *
+ * With SCREENAI=1 the text is read by the Screen AI helper instead of taken from mokuro; start it
+ * first with `python3 tools/manga_convert/screenai.py --serve` in the firmware repo.
  */
 import { chromium } from "playwright";
 import fs from "fs";
@@ -43,7 +46,12 @@ await page.setInputFiles("#manga-file", archive);
 await page.waitForSelector("#mokuro-volume-row:not([hidden])", { timeout: 60000 });
 const volumes = await page.$$eval("#mokuro-volume option", (os) => os.map((o) => o.textContent));
 check("volume picker lists the archive's volumes", volumes.length > 0, String(volumes.length));
-check("OCR card hidden for a mokuro volume", await page.$eval("#card-ocr", (el) => el.hidden));
+check("mokuro's own text is offered and picked", await page.isChecked('input[name="ocr-engine"][value="mokuro"]'));
+if (process.env.SCREENAI) {
+  await page.check('input[name="ocr-engine"][value="screenai"]');
+  await page.waitForFunction(() => /ready/.test(document.querySelector("#screenai-status").textContent), null, { timeout: 10000 });
+  check("Screen AI helper found", true);
+}
 await page.selectOption("#mokuro-volume", volumeArg);
 await page.check('input[name="booktype"][value="manga"]');
 for (const f of ["matcha", "matchafile", "epub", "pdf", "xtc", "xtch"]) {
@@ -83,8 +91,9 @@ for (let p = 0; p < pages; p++) {
 }
 console.log(`  ${pages} pages, ${blocks} text blocks, ${withLines} with line boxes, ${vertical} vertical, ${ellipses} with …`);
 check("text blocks carried over from mokuro", blocks > 0);
-// Older mokuro output has blocks without lines_coords; those fall back to whole-block lookup.
-check("line boxes present for word selection", withLines > 0, `${withLines}/${blocks}`);
+// Older mokuro output has no lines_coords (those blocks fall back to whole-block lookup); Screen AI
+// always gives each line's box.
+if (process.env.SCREENAI) check("every block has line boxes for word selection", withLines === blocks, `${withLines}/${blocks}`);
 check("ellipses folded to one cell", fullwidthDots === 0);
 const meta = fs.readFileSync(path.join(dir, "meta.bin"));
 check("meta.bin carries the language", meta.includes(Buffer.from("ja")));

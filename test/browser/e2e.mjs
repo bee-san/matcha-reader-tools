@@ -203,7 +203,7 @@ async function testManga(page, base) {
   console.log("manga.html end-to-end (CBZ, no OCR, grid detection):");
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", path.join(FIXTURES, "manga.cbz"));
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.uncheck("#manga-yolo"); // byte-exact references use the grid path
   // References are generated with no device downscaling, so "full" is the matching pick.
   await setMangaForm(page, { formats: ["matcha"], res: "full" });
@@ -239,7 +239,7 @@ async function testMangaYolo(page, base) {
   const ref = JSON.parse(fs.readFileSync(refPath, "utf-8"));
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", path.join(FIXTURES, "manga.cbz"));
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.check("#manga-yolo");
   await setMangaForm(page, { formats: ["matcha"], res: "full" });
   await page.fill("#manga-title", "Yolo Manga");
@@ -266,7 +266,7 @@ async function testMangaEpub(page, base) {
   console.log("manga.html end-to-end (EPUB with nav TOC, no OCR):");
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", path.join(FIXTURES, "manga.epub"));
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.uncheck("#manga-yolo");
   await setMangaForm(page, { formats: ["matcha"], res: "full" });
   const zipFile = await downloadFromPage(page, () => page.click("#manga-run"));
@@ -289,7 +289,7 @@ async function testMangaPdf(page, base) {
   }
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", path.join(FIXTURES, "manga.pdf"));
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.uncheck("#manga-yolo");
   await setMangaForm(page, { formats: ["matcha"], res: "full" });
   const zipFile = await downloadFromPage(page, () => page.click("#manga-run"));
@@ -413,7 +413,7 @@ async function testMangaFolderedCbz(page, base) {
   // device-folder export below.
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", cbz);
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.uncheck("#manga-yolo");
   await setMangaForm(page, { formats: ["xtch"], res: "x4" });
   await page.fill("#manga-title", "Foldered");
@@ -433,7 +433,7 @@ async function testMangaFolderedCbz(page, base) {
 
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", cbz);
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.uncheck("#manga-yolo");
   await setMangaForm(page, { formats: ["matcha"], res: "full" });
   await page.fill("#manga-title", "Foldered");
@@ -476,7 +476,7 @@ async function testMangaGeminiOcr(page, base) {
   try {
     await gotoManga(page, base);
     await page.setInputFiles("#manga-file", path.join(FIXTURES, "manga.cbz"));
-    await page.uncheck("#manga-no-ocr");
+    await page.check('input[name="ocr-engine"][value="gemini"]');
     await page.uncheck("#manga-yolo");
     await setMangaForm(page, { formats: ["matcha"], res: "full" });
     await page.fill("#manga-key", KEY);
@@ -554,7 +554,7 @@ async function testMangaPanelsOnly(page, base) {
   const pageCount = 3;  // full01..full03, one full-page panel each
   await gotoManga(page, base);
   await page.setInputFiles("#manga-file", cbz);
-  await page.check("#manga-no-ocr");
+  await page.check('input[name="ocr-engine"][value="none"]');
   await page.uncheck("#manga-yolo");
   // XTC needs a fixed page size, hence a device resolution rather than "full".
   await setMangaForm(page, { formats: ["matcha", "epub", "xtc"], res: "x4", panelsOnly: true });
@@ -600,7 +600,7 @@ async function testMangaNoOffscreenCanvas(browser, base) {
   const setup = async (pg) => {
     await gotoManga(pg, base);
     await pg.setInputFiles("#manga-file", path.join(FIXTURES, "manga.cbz"));
-    await pg.check("#manga-no-ocr");
+    await pg.check('input[name="ocr-engine"][value="none"]');
     await pg.uncheck("#manga-yolo");
     await setMangaForm(pg, { formats: ["matcha", "epub", "xtc"], res: "x4" });
     await pg.fill("#manga-title", "NoOffscreen");

@@ -1,8 +1,8 @@
 # 🍵 Matcha Reader Tools
 
-> bee-san's fork. It adds **mokuro volumes** as a manga input: choose a mokuro series `.zip` (or a
-> folder), pick a volume, and its own text and line positions go to the device. No Gemini key is
-> needed for word lookup. Live at <https://bee-san.github.io/matcha-reader-tools/>.
+> bee-san's fork. It adds **mokuro volumes** as a manga input (choose a mokuro series `.zip` or a
+> folder, pick a volume) and **Screen AI**, Chrome's on-device OCR, as a way to read the text with no
+> Gemini key. Live at <https://bee-san.github.io/matcha-reader-tools/>.
 
 Browser-based converters for the [Matcha Reader](https://github.com/eszter007/matcha-reader)
 e-reader firmware, a CrossPoint Reader fork with Japanese and Chinese learning features. Everything runs
@@ -21,6 +21,23 @@ to Gemini when you supply your own API key, and a book's text when you choose AI
 Each tool downloads a zip already laid out for the SD card: unzip it onto the card, or upload the
 files via the reader's built-in Wi-Fi web file transfer.
 
+## Screen AI text recognition
+
+Step 4 of the manga converter offers **Screen AI on this computer**: the OCR Chrome ships for
+accessibility, which reads vertical Japanese, small kana included, and gives every printed line its
+box, so word lookup on the device lands on the right word. A web page cannot load it, so it runs in
+a small helper from the Matcha Reader firmware repo:
+
+```sh
+python3 tools/manga_convert/screenai.py --serve
+```
+
+The first start downloads Chromium's own `screen-ai` package (checked against its published
+SHA-256). The helper listens on `127.0.0.1:7393` only and answers this site and local pages; each page
+goes to it and nowhere else. It regroups Screen AI's lines into speech bubbles and drops furigana,
+page numbers and stray marks. Browsers may ask once whether this page may reach apps on your
+device: allow it. There are no translations on this path; pick Gemini for those.
+
 ## Mokuro volumes
 
 [mokuro](https://github.com/kha-white/mokuro) 0.2 and later writes a `<volume>.mokuro` file next to
@@ -33,6 +50,10 @@ calls, and nothing leaves the browser.
   so multi-gigabyte series archives work (Zip64 included). An archive that never finished
   downloading is reported as soon as it is chosen.
 - **A folder**: use *Or choose a folder of mokuro volumes* on the series folder, then pick the volume.
+
+Step 4 then starts on **mokuro's own text**. Pick **Screen AI** instead to read the pages again:
+mokuro's reader (manga-ocr) confuses small kana (ぼ for ぽ, あ for ぁ), and volumes made with older
+mokuro versions carry no line positions, which leaves word lookup on whole bubbles.
 
 Pages keep mokuro's order. The title, the author (from a leading `[Author]` in the volume name), the
 series and the volume number come from the `.mokuro` file, and the language is set to Japanese.
