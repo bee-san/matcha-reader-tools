@@ -371,10 +371,9 @@ function showMokuroVolumes() {
   $("mokuro-error").textContent = mokuroInput.error;
   const isMokuro = mokuroInput.volumes.length > 0;
   $("ocr-engine-mokuro").hidden = !isMokuro;
-  // A mokuro volume starts on its own text unless Screen AI is wanted; anything else falls back
-  // to the engine last used for ordinary books.
-  if (isMokuro && ocrEngine() !== "screenai") setOcrEngine("mokuro");
-  else if (!isMokuro && ocrEngine() === "mokuro") setOcrEngine(savedOcrEngine());
+  // mokuro's own text is offered for a mokuro volume but not picked for it: the default reads the
+  // pages again, more accurately. Leaving a mokuro volume drops the choice that only it had.
+  if (!isMokuro && ocrEngine() === "mokuro") setOcrEngine(savedOcrEngine());
   updateRunSummary();
 }
 
@@ -700,11 +699,13 @@ function setOcrEngine(value) {
   applyOcrUi();
 }
 
-/* The engine the user picked last for books that are not mokuro volumes. */
+/* The engine picked last, else PP-OCR: the most accurate that needs no key or helper. Someone who
+ * used Gemini before the choice existed keeps it. */
+const OCR_DEFAULT = "ppocr";
 function savedOcrEngine() {
-  const saved = loadSetting("manga-ocr-engine", "");
+  const saved = loadSetting("manga-ocr-choice", "");
   if (OCR_ENGINES.includes(saved) && saved !== "mokuro") return saved;
-  return loadSetting("manga-no-ocr", "1") === "1" ? "none" : "gemini";
+  return loadSetting("manga-no-ocr", "1") === "0" ? "gemini" : OCR_DEFAULT;
 }
 
 async function screenaiHelperRunning() {
@@ -2473,7 +2474,7 @@ if (typeof document !== "undefined" && document.getElementById("manga-run")) {
   for (const r of document.querySelectorAll('input[name="ocr-engine"]')) {
     r.addEventListener("change", () => {
       setOcrEngine(r.value);
-      if (r.value !== "mokuro") saveSetting("manga-ocr-engine", r.value);
+      if (r.value !== "mokuro") saveSetting("manga-ocr-choice", r.value);
       clearValidationWarnings();
     });
   }

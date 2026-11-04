@@ -24,14 +24,15 @@ files via the reader's built-in Wi-Fi web file transfer.
 
 ## Choosing the text recognition
 
-Step 4 of the manga converter picks what reads the speech bubbles. Every choice but Gemini keeps the
+Step 4 of the manga converter picks what reads the speech bubbles. PP-OCR is the default, mokuro
+volumes included: it was the most accurate, and needs no key or helper. Every choice but Gemini keeps the
 pages on your computer, and all of them give each printed line its position, so word lookup on the
 device lands on the right word (mokuro only when its file has line positions).
 
 | Choice | Runs | Notes |
 |---|---|---|
 | **mokuro's own text** | already in a mokuro volume | Instant. manga-ocr confuses small kana; older volumes have no line positions. |
-| **PP-OCR manga, in this browser** | ONNX Runtime Web (WASM) | 12 MB downloaded once, about 2–3 s a page. Japanese and Chinese. |
+| **PP-OCR manga, in this browser** (default) | ONNX Runtime Web (WASM) | 12 MB downloaded once, about 2–3 s a page. Japanese and Chinese. |
 | **Screen AI on this computer** | local helper, see below | Fast; reads small kana well, sometimes slips on `!?`. |
 | **Gemini** | Google, with your API key | Also translates each panel. |
 | **Skip** | — | Panels only, no lookup. |
@@ -80,8 +81,8 @@ calls, and nothing leaves the browser.
   downloading is reported as soon as it is chosen.
 - **A folder**: use *Or choose a folder of mokuro volumes* on the series folder, then pick the volume.
 
-Step 4 then starts on **mokuro's own text**. Pick **Screen AI** instead to read the pages again:
-mokuro's reader (manga-ocr) confuses small kana (ぼ for ぽ, あ for ぁ), and volumes made with older
+Step 4 reads the pages again with PP-OCR by default. **mokuro's own text** is offered too: instant,
+but mokuro's reader (manga-ocr) confuses small kana (ぼ for ぽ, あ for ぁ), and volumes made with older
 mokuro versions carry no line positions, which leaves word lookup on whole bubbles.
 
 Pages keep mokuro's order. The title, the author (from a leading `[Author]` in the volume name), the

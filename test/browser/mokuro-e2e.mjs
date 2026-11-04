@@ -4,7 +4,7 @@
  *
  *   node test/browser/mokuro-e2e.mjs path/to/Series.zip [volume-index] [max-pages]
  *
- * OCR=ppocr reads the text with PP-OCR in the page instead of taking mokuro's; OCR=screenai uses the
+ * The default reads the text with PP-OCR; OCR=mokuro takes mokuro's own, OCR=screenai uses the
  * Screen AI helper (start `python3 tools/manga_convert/screenai.py --serve` in the firmware repo).
  */
 import { chromium } from "playwright";
@@ -46,14 +46,15 @@ await page.setInputFiles("#manga-file", archive);
 await page.waitForSelector("#mokuro-volume-row:not([hidden])", { timeout: 60000 });
 const volumes = await page.$$eval("#mokuro-volume option", (os) => os.map((o) => o.textContent));
 check("volume picker lists the archive's volumes", volumes.length > 0, String(volumes.length));
-check("mokuro's own text is offered and picked", await page.isChecked('input[name="ocr-engine"][value="mokuro"]'));
+check("mokuro's own text is offered", await page.isVisible('input[name="ocr-engine"][value="mokuro"]'));
+check("PP-OCR is the default", await page.isChecked('input[name="ocr-engine"][value="ppocr"]'));
 const OCR = process.env.OCR || "";
 if (OCR === "screenai") {
   await page.check('input[name="ocr-engine"][value="screenai"]');
   await page.waitForFunction(() => /ready/.test(document.querySelector("#screenai-status").textContent), null, { timeout: 10000 });
   check("Screen AI helper found", true);
-} else if (OCR === "ppocr") {
-  await page.check('input[name="ocr-engine"][value="ppocr"]');
+} else if (OCR === "mokuro") {
+  await page.check('input[name="ocr-engine"][value="mokuro"]');
 }
 await page.selectOption("#mokuro-volume", volumeArg);
 await page.check('input[name="booktype"][value="manga"]');
@@ -96,7 +97,7 @@ console.log(`  ${pages} pages, ${blocks} text blocks, ${withLines} with line box
 check("text blocks carried over from mokuro", blocks > 0);
 // Older mokuro output has no lines_coords (those blocks fall back to whole-block lookup); Screen AI
 // always gives each line's box.
-if (OCR) check("every block has line boxes for word selection", withLines === blocks, `${withLines}/${blocks}`);
+if (OCR !== "mokuro") check("every block has line boxes for word selection", withLines === blocks, `${withLines}/${blocks}`);
 check("ellipses folded to one cell", fullwidthDots === 0);
 const meta = fs.readFileSync(path.join(dir, "meta.bin"));
 check("meta.bin carries the language", meta.includes(Buffer.from("ja")));
