@@ -1,5 +1,9 @@
 # 🍵 Matcha Reader Tools
 
+> bee-san's fork. It adds **mokuro volumes** as a manga input: choose a mokuro series `.zip` (or a
+> folder), pick a volume, and its own text and line positions go to the device. No Gemini key is
+> needed for word lookup. Live at <https://bee-san.github.io/matcha-reader-tools/>.
+
 Browser-based converters for the [Matcha Reader](https://github.com/eszter007/matcha-reader)
 e-reader firmware, a CrossPoint Reader fork with Japanese and Chinese learning features. Everything runs
 client-side: **no installs, no uploads**. Files never leave your device, except panel images sent
@@ -16,6 +20,30 @@ to Gemini when you supply your own API key, and a book's text when you choose AI
 
 Each tool downloads a zip already laid out for the SD card: unzip it onto the card, or upload the
 files via the reader's built-in Wi-Fi web file transfer.
+
+## Mokuro volumes
+
+[mokuro](https://github.com/kha-white/mokuro) 0.2 and later writes a `<volume>.mokuro` file next to
+each volume's folder of pages. The file holds every speech bubble's text and the box of each printed
+line, which is what the device needs for word lookup. So a mokuro volume skips Gemini: no key, no
+calls, and nothing leaves the browser.
+
+- **A series archive** (`.zip` or `.cbz` with one or more volumes in it): choose the file, then pick
+  the volume in the list that appears. Only the archive's directory and that volume's files are read,
+  so multi-gigabyte series archives work (Zip64 included). An archive that never finished
+  downloading is reported as soon as it is chosen.
+- **A folder**: use *Or choose a folder of mokuro volumes* on the series folder, then pick the volume.
+
+Pages keep mokuro's order. The title, the author (from a leading `[Author]` in the volume name), the
+series and the volume number come from the `.mokuro` file, and the language is set to Japanese.
+Panels are still detected here, because mokuro has none; mokuro's text boxes help, since panel crops
+grow to cover every bubble. Text outside every panel, such as page numbers, is left out. mokuro
+writes `…` as three full-width full stops and letters full width; both are folded back, so the
+device puts each printed character in its own cell. Webtoon re-cutting cannot be combined with a
+mokuro volume.
+
+The firmware fork's `tools/manga_convert/convert_manga.py --input <volume>.mokuro` does the same on
+the command line.
 
 ## What the panel detection does
 

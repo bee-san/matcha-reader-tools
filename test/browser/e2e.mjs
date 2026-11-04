@@ -81,14 +81,28 @@ async function gotoManga(page, base) {
 
 /* bookType: the page refuses to run until one is picked. "manga" (right to left) is what the
  * references are generated with -- convert_manga.py's default order. */
+/* The book type and screen size are picked on radio cards; the selects they drive are hidden. */
+async function pickBookType(page, bookType) {
+  await page.check(`input[name="booktype"][value="${bookType}"]`);
+}
+async function pickResolution(page, res) {
+  const screens = { x4: "480x800", x4pro: "480x800", x3: "528x792" };
+  if (screens[res]) {
+    await page.check(`input[name="screen"][value="${screens[res]}"]`);
+  } else {
+    await page.check('input[name="screen"][value="other"]');
+    await page.check(`input[name="screen-other"][value="${res}"]`);
+  }
+}
+
 async function setMangaForm(page, { formats = ["matcha"], res = "full", panelsOnly = false, bookType = "manga" }) {
-  await page.selectOption("#manga-booktype", bookType);
+  await pickBookType(page, bookType);
   for (const f of MANGA_FORMATS) {
     const sel = `#manga-format .fmt[value="${f}"]`;
     if (formats.includes(f)) await page.check(sel); else await page.uncheck(sel);
   }
-  if (panelsOnly) await page.check("#manga-panels-only"); else await page.uncheck("#manga-panels-only");
-  await page.selectOption("#manga-res", res);
+  await page.check(`input[name="pagemode"][value="${panelsOnly ? "panels" : "full"}"]`);
+  await pickResolution(page, res);
 }
 
 /* Page count from an XTC/XTCH container header (u16 at offset 6). */

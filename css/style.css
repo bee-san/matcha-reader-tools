@@ -241,6 +241,7 @@ textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace
 .filebtn { position: relative; }
 .filebtn input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .filebtn:focus-within { outline: 3px solid var(--matcha-dark); outline-offset: 3px; }
+.filebtn-secondary { margin-top: 0.5rem; padding: 0.45rem 1rem; font-weight: 500; border-style: dotted; }
 
 .row { display: flex; gap: 0.8rem; flex-wrap: wrap; }
 .row > div { flex: 1 1 160px; }

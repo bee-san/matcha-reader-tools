@@ -29,6 +29,7 @@ Object.assign(global, rubyCommon);
 const ruby = require("../../js/pinyin-ruby.js");
 const furigana = require("../../js/furigana-ruby.js");
 const manga = require("../../js/manga-core.js");
+const mokuro = require("../../js/mokuro.js");
 const epub = require("../../js/manga-epub.js");
 
 let failures = 0;
@@ -1332,6 +1333,82 @@ function testXtc() {
   }
 }
 
+
+/* mokuro input: the same cases as tools/manga_convert/test_mokuro.py in the firmware fork. */
+async function testMokuro() {
+  const quad = (x1, y1, x2, y2) => [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+  const block = (box, lines, coords, vertical = true) => ({ box, vertical, lines, lines_coords: coords });
+
+  const m = mokuro.mokuroMetadata({ title: "Aho Girl", volume: "[ヒロユキ] アホガール 第01巻" });
+  check("mokuro: author from brackets", m.title === "アホガール 第01巻" && m.author === "ヒロユキ" && m.series === "Aho Girl" && m.seriesIndex === 1);
+  check("mokuro: full-width volume number", mokuro.mokuroMetadata({ title: "S", volume: "よつばと！ 第１２巻" }).seriesIndex === 12);
+  check("mokuro: western volume number", mokuro.mokuroMetadata({ title: "S", volume: "Yotsuba to! v03" }).seriesIndex === 3);
+  check("mokuro: number in the title is not a volume", mokuro.mokuroMetadata({ title: "S", volume: "20世紀少年" }).seriesIndex === null);
+  const lost = mokuro.mokuroMetadata({ title: "Blue Lock", volume: "\uFFFD\uFFFD23\uFFFD\uFFFD" });
+  check("mokuro: a name whose encoding was lost", lost.title === "Blue Lock 23" && lost.seriesIndex === 23, JSON.stringify(lost));
+  check("mokuro: full-width brackets", mokuro.mokuroMetadata({ title: "S", volume: "［作者］タイトル 第２巻" }).author === "作者");
+
+  check("mokuro: ellipsis and full-width letters fold to printed cells",
+    mokuro.mokuroLineText(" そんな．．．ＯＫ１００！ ") === "そんな…OK100！" && mokuro.mokuroLineText("．．．．．．") === "……");
+
+  // A 2000x3000 scan, trimmed to (100, 200)-(1900, 2900), fitted to 480x720.
+  const rec = { img_width: 2000, img_height: 3000, blocks: [block([1000, 1100, 1300, 1700], ["一行目", "二行目"],
+    [quad(1200, 1100, 1300, 1700), quad(1000, 1100, 1100, 1500)])] };
+  const b = mokuro.mokuroTextBlocks(rec, [2000, 3000], [100, 200], [1800, 2700], [480, 720])[0];
+  check("mokuro: boxes follow trim and downscale",
+    JSON.stringify(b.box) === "[240,240,320,400]" && JSON.stringify(b.lines) === "[[293,240,320,400],[240,240,267,347]]"
+    && b.text === "一行目\n二行目" && b.vertical === true, JSON.stringify(b));
+  const partial = mokuro.mokuroTextBlocks({ blocks: [block([0, 0, 100, 100], ["あ", "", "う"], [quad(0, 0, 10, 10), quad(0, 0, 10, 10), quad(0, 0, 10, 10)])] },
+    [100, 100], [0, 0], [100, 100], [100, 100])[0];
+  check("mokuro: partial lines fall back to the whole block", partial.lines.length === 0 && partial.text === "あ\nう");
+  check("mokuro: rotated image skips its text",
+    mokuro.mokuroTextBlocks({ img_width: 1000, img_height: 1500, blocks: [block([0, 0, 10, 10], ["あ"], [quad(0, 0, 10, 10)])] },
+      [1500, 1000], [0, 0], [1500, 1000], [800, 533]).length === 0);
+
+  const frame = [100, 100, 400, 400], crop = [80, 100, 400, 400];
+  const bubble = { box: [82, 150, 98, 200] }, folio = { box: [10, 480, 40, 495] };
+  const owned = mokuro.mokuroAssignTextToPanels([bubble, folio], [frame], [crop]);
+  check("mokuro: overhanging bubble kept, page number dropped", owned.length === 1 && owned[0].length === 1 && owned[0][0] === bubble);
+  const right = [500, 0, 1000, 500], left = [0, 0, 480, 500];
+  const first = { box: [880, 20, 960, 200] }, second = { box: [600, 20, 680, 200] };
+  const order = mokuro.mokuroAssignTextToPanels([second, first], [right, left], [right, left]);
+  check("mokuro: text in reading order within a panel", order[0][0] === first && order[0][1] === second && order[1].length === 0);
+
+  check("mokuro: safe paths", mokuro.mokuroSafeRelPath("a/./b.jpg") === "a/b.jpg" && mokuro.mokuroSafeRelPath("../x.jpg") === null
+    && mokuro.mokuroSafeRelPath("/x.jpg") === null);
+  check("mokuro: macOS litter ignored", mokuro.mokuroIgnoredPath("__MACOSX/v.mokuro") && mokuro.mokuroIgnoredPath("s/._v.mokuro")
+    && !mokuro.mokuroIgnoredPath("s/v.mokuro"));
+
+  // A small series archive: two volumes, read through BlobZip like a multi-gigabyte one.
+  const page = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const json = (vol) => new TextEncoder().encode(JSON.stringify({ title: "S", volume: vol,
+    pages: [{ img_path: "001.jpg", img_width: 10, img_height: 10, blocks: [] }] }));
+  const zw = new zip.ZipWriter();
+  zw.addFile("S/Vol 2.mokuro", json("Vol 2"));
+  zw.addFile("S/Vol 2/001.jpg", page);
+  zw.addFile("S/Vol 10.mokuro", json("Vol 10"));
+  zw.addFile("S/Vol 10/001.jpg", page);
+  zw.addFile("__MACOSX/S/._Vol 2.mokuro", new Uint8Array([0]));
+  const archive = zw.toBlob();
+  const bz = await mokuro.BlobZip.open(archive);
+  const vols = mokuro.mokuroVolumesInZip(bz.entries);
+  check("mokuro: volumes listed in natural order, litter skipped",
+    vols.map((v) => v.name).join("|") === "Vol 2|Vol 10", vols.map((v) => v.name).join("|"));
+  const collected = await mokuro.collectFromMokuroZip(bz, vols[1]);
+  const bytes = await collected.pages[0].read();
+  check("mokuro: a volume's page read from the archive",
+    collected.pages.length === 1 && collected.meta.language === "ja" && bytes.length === 4 && bytes[0] === 0xff);
+  let missingError = "";
+  const noImage = new zip.ZipWriter();
+  noImage.addFile("S/Vol 1.mokuro", json("Vol 1"));
+  const bz2 = await mokuro.BlobZip.open(noImage.toBlob());
+  try { await mokuro.collectFromMokuroZip(bz2, mokuro.mokuroVolumesInZip(bz2.entries)[0]); } catch (e) { missingError = e.message; }
+  check("mokuro: a missing page fails the volume", /missing/.test(missingError), missingError);
+  let unfinished = "";
+  try { await mokuro.BlobZip.open(new Blob([new Uint8Array(4096)])); } catch (e) { unfinished = e.message; }
+  check("mokuro: an unfinished download is named", /never finished/.test(unfinished), unfinished);
+}
+
 (async () => {
   testManga();
   testMangaBookType();
@@ -1360,6 +1437,7 @@ function testXtc() {
   await testPinyinRuby();
   await testRubyAi();
   await testZipRoundTrip();
+  await testMokuro();
   if (failures) {
     console.error(`\n${failures} failure(s)`);
     process.exit(1);

@@ -41,9 +41,21 @@
     <label class="filebtn">
       <span id="manga-file-label">Tap to choose a .cbz / .zip / .epub / .pdf — or select page images</span>
       <input type="file" id="manga-file" multiple
-             accept=".cbz,.zip,.epub,.pdf,application/pdf,image/jpeg,image/png,image/webp,image/bmp">
+             accept=".cbz,.zip,.epub,.pdf,.mokuro,application/pdf,image/jpeg,image/png,image/webp,image/bmp">
+    </label>
+    <label class="filebtn filebtn-secondary">
+      <span>Or choose a folder of mokuro volumes</span>
+      <input type="file" id="manga-folder" webkitdirectory>
     </label>
     <p class="hint">One book, or several at once for a whole series.</p>
+    <div id="mokuro-volume-row" hidden>
+      <label for="mokuro-volume" style="margin-top:0.6rem">Volume</label>
+      <select id="mokuro-volume"></select>
+      <p class="hint">A <a href="https://github.com/kha-white/mokuro">mokuro</a> volume brings its own
+      text and the position of every line, so word lookup works on the device without Gemini.
+      Text recognition below is skipped.</p>
+    </div>
+    <p class="hint" id="mokuro-error" hidden></p>
     <details>
       <summary>How pages are ordered</summary>
       <p class="hint">By file name, cover and copyright first. A .cbz or .zip with a folder per chapter
@@ -456,6 +468,7 @@
 <script src="js/zip.js"></script>
 <script src="js/common.js"></script>
 <script src="js/manga-core.js"></script>
+<script src="js/mokuro.js"></script>
 <script src="js/manga-epub.js"></script>
 <script src="js/manga-pdf.js"></script>
 <script src="js/yolo.js"></script>
