@@ -165,6 +165,45 @@ average.
 <img src="docs/images/panels-webtoon.jpg" width="720" alt="Six webtoon pages re-cut from a vertical strip, each with numbered panels">
 </details>
 
+### How good the AI detection is
+
+The detector is a YOLO26s model trained on Manga109
+([ShadowB/Manga109-panel-balloon-text-yolov26-segmentation](https://huggingface.co/ShadowB/Manga109-panel-balloon-text-yolov26-segmentation)),
+run in the browser through ONNX Runtime's WebAssembly backend. It replaced a YOLO26n after both
+were scored on 55 hand-labelled pages from 37 series: dense action, 4-koma, splash and title
+pages, colour, borderless, slanted and overlapping panels, black gutters, bubbles crossing
+borders. None of them is from Manga109. Pages were scored at 480×800, the size the X4 and X4
+Pro convert at. A panel counts as found when its box overlaps the drawn panel by IoU 0.75 or
+more. A page is exactly right when it has the right number of panels and every one is found.
+
+| | Panels found (F1, IoU ≥ 0.75) | Pages exactly right | Detection per page | Download |
+|---|---|---|---|---|
+| White-gutter heuristic (no AI) | 13% | 7 of 55 | 1 ms | — |
+| YOLO26n (before) | 94.5% | 44 of 55 | 0.15 s | 9.6 MB |
+| **YOLO26s (now)** | **98.4%** | **50 of 55** | **0.52 s** | **19.8 MB** |
+
+Times are single-threaded WebAssembly, as GitHub Pages runs it, on a laptop Intel Core Ultra 7
+165U: roughly two minutes of detection for a 200-page volume. At full resolution ("Original")
+the new model scores 97.8% and 49 of 55; the old one scored 93.7% and 43 of 55. That relies on
+large pages being shrunk to the model's input with an area average: the bilinear sampling used
+before scored 96.1% and 46 of 55 there, because a hairline frame shrunk threefold falls between
+samples. Reading order is unchanged: 44 of the 48 pages where every panel was found come out in
+order, and three of the four misses come out wrong even from the hand-drawn boxes. It does best
+where the old one struggled. On borderless panels it scores 97% against 82%, on slanted ones 95%
+against 87%, and on black gutters 92% against 79%. All three splash pages are now right; the old
+model cut the sky off one. The five pages it still gets wrong are hard ones. On a slanted page
+with black gutters it merges two panels. It misses a framed card holding only narration, a
+borderless lightning strip, and a narrow panel with no top frame. On a collage page it boxes one
+panel too loosely.
+
+Also measured, and left out because they did not help: flipped and multi-scale passes with
+fused boxes, snapping box edges to the drawn frame lines, tightening boxes with the model's
+segmentation masks, combining two models, and running the model at 1280. Bigger models did
+no better at many times the cost: RF-DETR Medium (98.0%, 2.7 s a page, 61 MB) and
+RT-DETRv4-X (98.4%, 250 MB). The weights are stored as fp16, which scores the same as fp32 at
+half the download. The method, the label rules and the harness are in
+[test/README.md](test/README.md#panel-detection-benchmark).
+
 ## Hosting / running
 
 It's a static site with no build step. Any static host works:
@@ -179,8 +218,9 @@ can pair a fresh page with a stale script. That happened once and killed every c
 page. Stamping at deploy time means the version cannot be forgotten, and local development keeps
 plain paths.
 
-The vendored ONNX Runtime, PDF.js and the YOLO model stay unstamped on purpose: pinned, rarely
-changed, and 21 MB for the model alone. Bump their paths if one is replaced.
+The vendored ONNX Runtime, PDF.js and the panel model stay unstamped on purpose: pinned, rarely
+changed, and 20 MB for the model alone. Bump their paths if one is replaced (the model's lives in
+`js/yolo.js:YOLO_MODEL_URL`).
 
 ## Manga converter options
 
@@ -192,7 +232,7 @@ changed, and 21 MB for the model alone. Bump their paths if one is replaced.
 | **Device** (screen size cards) | `--device NAME` (or `--x4` / `--x3`) | Downscales before detection. 480×800 for the X4/X4C, X4 Pro, Sticky, Papermono, BOOX Picco and Metalio E-Ink 4; 528×792 for the X3; 552×768 for the EEGO Reader A4; 684×1216 for the Metalio E-Ink 4 Plus; or a custom 1–4096 px size (browser only). Never upscales. Full resolution warns: the Xteink firmware struggles with it. |
 | **Translate into** | *(browser only)* | Language the translations come back in. The desktop tool always uses English. |
 | **Language** (step 5) | `--language` | Splits reading stats by language, and tells OCR what to expect. `jp`→`ja`, `cn`→`zh`, `kr`→`ko`; `zh-Hant` kept intact. |
-| **AI panel detection** | — | YOLO26 in-browser. Untick for the white-gutter heuristic, which is also the automatic fallback. Disabled for webtoons, whose panels come from gutters. |
+| **AI panel detection** | — | A YOLO26s model trained on Manga109, in the browser (a one-time 31 MB download with its runtime). Untick for the white-gutter heuristic, which is also the automatic fallback. Disabled for webtoons, whose panels come from gutters. |
 | **Turn wide panels sideways** | — | EPUB, PDF and XTC/XTCH only: those bake in orientation. The Matcha format rotates on the device instead. |
 | **Black-and-white pages** | `--mono` | Dithered black-and-white pages. One fast refresh on the device. Best for line art. |
 | **Brightness** | *(browser only)* | Gamma applied before dithering, for scans that come out darker than the original. Affects black-and-white pages and XTC/XTCH only. |
@@ -262,16 +302,23 @@ Ports of the firmware's scripts, not reimplementations from the spec.
 
 | Tool | Ports | Output |
 |---|---|---|
-| Manga | `tools/manga_convert/convert_manga.py` | Byte-identical, given the same input pixels |
+| Manga | `tools/manga_convert/convert_manga.py` | Byte-identical, given the same input pixels, except AI panel detection (below) |
 | Dictionary | `tools/dict_convert/convert_jmdict.py` (Japanese, Chinese and Cantonese paths), `scripts/gen_dict_spx.py` | Byte-identical |
 | Furigana & Pinyin | `tools/furigana_ruby/add_furigana_ruby.py`, `tools/pinyin_ruby/add_pinyin_ruby.py`, `tools/ruby_common/ruby_epub.py` | Identical XHTML for the same model answers; the zip is stored rather than deflated. Japanese dictionary furigana has no Python counterpart |
 | Fonts | `lib/EpdFont/scripts/fontconvert_sdcard.py` | Byte-identical except glyph bitmaps |
 
-Three places where pixels differ, each verified within ±2 px: AI detection (same
-[YOLO26 model](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n), ONNX Runtime instead
-of PyTorch, so float rounding differs), downscaling and PDF rasterization (browser canvas and
-PDF.js instead of Pillow and PyMuPDF), and glyph bitmaps (the browser's font engine instead of
-FreeType). Post-processing after detection is identical. Everything else is pixel-exact.
+**AI panel detection deliberately differs.** `convert_manga.py` runs the YOLO26n model; this fork
+runs a YOLO26s model that finds noticeably more panels exactly
+([measured](#how-good-the-ai-detection-is)), with a simpler post-processing step: the model's own
+boxes after non-maximum suppression, no merging of overlapping boxes and no re-splitting of a
+frame into the weaker boxes inside it, both of which cost it panels. Crops grow over the model's
+speech-balloon boxes as well as its text boxes, and large pages are shrunk for the model with an
+area average. So with AI detection on, panel boxes, crops and `panels.idx` differ from the Python
+tool's. The grid heuristic, reading order and everything downstream are unchanged.
+
+Two places where pixels differ, each verified within ±2 px: downscaling and PDF rasterization
+(browser canvas and PDF.js instead of Pillow and PyMuPDF), and glyph bitmaps (the browser's font
+engine instead of FreeType). Everything else is pixel-exact.
 
 `js/mdx.js` additionally ports `readmdict` for MDict input: engine 1.2/2.0, zlib/LZO/uncompressed
 blocks, `Encrypted=2` key-index encryption, and `Encrypted=1` registration encryption given the
@@ -285,12 +332,12 @@ needs a checkout of the firmware repo next door, or `MATCHA_READER=/path/to/repo
 
 ```bash
 pip install Pillow freetype-py fonttools    # for reference generation
-pip install numpy onnxruntime               # optional: YOLO panel-detection references
+pip install numpy onnxruntime               # optional: AI panel-detection references
 pip install pymupdf                          # optional: PDF-input references
 pip install readmdict python-lzo             # optional: MDict .mdx references (needs liblzo2-dev)
 python3 test/gen_references.py             # build fixtures + Python references
 
-npm install onnxruntime-web                # optional: YOLO detection in the Node tests
+npm install onnxruntime-web                # optional: AI detection in the Node tests
 node test/node/run.cjs                     # pure-logic byte comparisons (Node ≥ 18)
 
 npm install playwright                     # browser end-to-end (drives the real pages)
@@ -300,6 +347,9 @@ python3 /path/to/matcha-reader/lib/EpdFont/scripts/fontconvert_sdcard.py \
   -o test/fixtures/ref_font/DejaVuSans_14.cpfont
 node test/browser/e2e.mjs
 ```
+
+`test/panels/` scores panel detectors against hand-labelled pages; see
+[test/README.md](test/README.md#panel-detection-benchmark).
 
 ## Notes & limits
 
@@ -312,6 +362,7 @@ node test/browser/e2e.mjs
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The panel model in `models/` is not covered by it: it is a
+fine-tune of Ultralytics YOLO26 and is treated as AGPL-3.0; see [models/README.md](models/README.md).
 
 Icons: [Tabler Icons](https://tabler.io/icons) by Paweł Kuna, MIT License.

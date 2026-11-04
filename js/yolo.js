@@ -1,33 +1,32 @@
-/* YOLO panel detection: browser port of the Python tool's primary detector
- * (convert_manga.py:_detect_panels_yolo), running the same fine-tuned
- * YOLO26-nano model (leoxs22/manga-panel-detector-yolo26n) client-side via
- * ONNX Runtime Web instead of PyTorch.
+/* AI panel detection: a YOLO26s model trained on Manga109
+ * (ShadowB/Manga109-panel-balloon-text-yolov26-segmentation), run client-side with ONNX Runtime
+ * Web. The shipped file keeps only the detection head: the segmentation branch is cut off, since
+ * panels.dat stores rectangles and the masks did not make them any tighter. Its weights are
+ * stored as fp16, each cast back to fp32 by a Cast node that ONNX Runtime folds away when the
+ * session loads: half the download, and inference still runs in fp32. test/panels/README.md has
+ * the benchmark behind these choices.
  *
- * Pure logic only in this file — preprocessing (letterbox), output decoding,
- * and the sliver/dedupe post-processing ported line-for-line from the Python
- * tool. Session creation and lazy runtime loading live in manga-ui.js so
- * Node tests can exercise these functions with onnxruntime-web's wasm
+ * Pure logic only in this file: preprocessing (letterbox), output decoding with non-maximum
+ * suppression, and growing crops over speech balloons. Session creation and lazy runtime loading
+ * live in manga-ui.js, so Node tests can drive these functions with onnxruntime-web's wasm
  * backend directly.
  */
 "use strict";
 
+const YOLO_MODEL_URL = "models/manga109_panels_yolo26s_fp16.onnx";
 const YOLO_INPUT_SIZE = 640;
 const YOLO_STRIDE = 32;            // ultralytics LetterBox(auto=True) pads to this multiple
-const YOLO_CONF_THRESHOLD = 0.4;   // convert_manga.py:_detect_panels_yolo(conf=0.4)
-const YOLO_WEAK_CONF = 0.15;       // convert_manga.py:PANEL_WEAK_CONF
-
-/* A second pass at a larger input when the first one barely finds anything.
- * The model's panel head is scale-sensitive: a small, sparsely inked page (a
- * hand-drawn 4-koma, say) letterboxed into 640 can yield a single box covering
- * a tenth of the page, while the same page at 1600 comes back fully panelled --
- * measured 1 panel at 9% against 8 panels at 77%. Pages it already reads well
- * (75-97% on every sample here, fixtures included) never reach the retry, and a
- * genuine full-page splash keeps its single box, since one panel covering the
- * page is high coverage, not low. convert_manga.py:PANEL_RETRY_*. */
-const YOLO_RETRY_COVER_FRAC = 0.5;
-const YOLO_RETRY_INPUT_SIZE = 1600;
-const YOLO_PANEL_CLASS = 0;        // 0=panel, 1=text
+const YOLO_NUM_CLASSES = 3;
+const YOLO_PANEL_CLASS = 0;        // Manga109's "frame"
 const YOLO_TEXT_CLASS = 1;
+const YOLO_BALLOON_CLASS = 2;
+/* Panel score bar. 0.35 to 0.5 score alike on the benchmark's development half; 0.45 drops one
+ * false panel there that 0.35 keeps. */
+const YOLO_CONF_THRESHOLD = 0.45;
+/* Text and balloon boxes only grow crops, so a slightly looser bar costs little. */
+const YOLO_TEXT_CONF = 0.4;
+/* Per-class non-maximum suppression, as ultralytics' predict() does by default. */
+const YOLO_NMS_IOU = 0.7;
 
 /* convert_manga.py:TEXT_OWNERSHIP_MIN_FRAC — fraction of a text box's area that
  * must fall inside a panel before that panel is grown to cover it. A bubble
@@ -37,29 +36,49 @@ const YOLO_TEXT_CLASS = 1;
 const TEXT_OWNERSHIP_MIN_FRAC = 0.25;
 
 /* convert_manga.py:TEXT_PAD_FRAC_OF_PAGE / TEXT_PAD_MIN — breathing room put
- * around a text box before a panel is grown over it. The detector boxes the
- * GLYPHS, not the balloon holding them, so unioning on the bare box lands the
- * crop edge on the bubble's own outline, which reads as a second cut. */
+ * around a text box before a panel is grown over it, so the crop edge does not
+ * land on the bubble's own outline. */
 const TEXT_PAD_FRAC_OF_PAGE = 0.02;
 const TEXT_PAD_MIN = 6;
 
-/* convert_manga.py:SUBPANEL_* — a frame is replaced by the sub-panels found
- * inside it only when each child is meaningfully smaller than the frame, sits
- * almost entirely within it, the children between them account for most of the
- * frame, and they tile rather than restate each other. */
-const SUBPANEL_MAX_AREA_FRAC = 0.7;
-const SUBPANEL_INSIDE_FRAC = 0.85;
-const SUBPANEL_COVER_FRAC = 0.7;
-const SUBPANEL_SIBLING_OVERLAP_FRAC = 0.3;
+/* Resampling weights along one axis, from `src` pixels to `dst`: for each destination pixel a
+ * list of [source index, weight] summing to 1. Shrinking averages every source pixel the
+ * destination pixel covers (a box filter, partial pixels weighted by coverage); enlarging
+ * interpolates the two nearest (bilinear, pixel centres aligned as cv2.INTER_LINEAR does).
+ *
+ * Bilinear alone samples only two source pixels per output pixel, so a page shrunk by 3x
+ * aliases: hairline frames break up and screentone turns to noise. On the panel benchmark at
+ * full resolution that cost 6 points of exactly-right pages against the box filter. */
+function yoloAxisWeights(dst, src) {
+  const out = new Array(dst);
+  const ratio = src / dst;
+  for (let i = 0; i < dst; i++) {
+    if (ratio > 1) {
+      const lo = i * ratio, hi = (i + 1) * ratio;
+      const taps = [];
+      for (let k = Math.floor(lo); k < Math.min(src, Math.ceil(hi)); k++) {
+        taps.push([k, (Math.min(k + 1, hi) - Math.max(k, lo)) / ratio]);
+      }
+      out[i] = taps;
+    } else {
+      const sPos = Math.min(Math.max((i + 0.5) * ratio - 0.5, 0), src - 1);
+      const k0 = Math.floor(sPos);
+      const k1 = Math.min(k0 + 1, src - 1);
+      const f = sPos - k0;
+      out[i] = [[k0, 1 - f], [k1, f]];
+    }
+  }
+  return out;
+}
 
 /* Letterbox an RGBA image into a float32 CHW tensor (RGB, /255), padding with
- * 114-gray. Reproduces ultralytics' LetterBox(new_shape=640, auto=True,
- * stride=32) — the preprocessing `model.predict()` applies — which is
+ * 114-gray. Reproduces the geometry of ultralytics' LetterBox(new_shape=640,
+ * auto=True, stride=32) — the preprocessing `model.predict()` applies — which is
  * RECTANGULAR: the long side is scaled to 640 and the short side is padded only
  * up to the next multiple of 32, not out to a square. Squaring the input
  * instead changes the apparent scale of everything in the page and moves the
- * model's confidences enough to gain and lose whole panels, so this has to
- * match the Python tool exactly.
+ * model's confidences enough to gain and lose whole panels. The resize itself
+ * is yoloAxisWeights(): area-averaged when shrinking, bilinear when enlarging.
  *
  * Returns {data, netW, netH, scale, padX, padY}; netW/netH are the tensor's
  * spatial dims and scale/pad map detected boxes back to source pixels. */
@@ -83,65 +102,35 @@ function yoloLetterbox(rgba, w, h, size, stride) {
   const plane = netW * netH;
   const data = new Float32Array(3 * plane).fill(114 / 255);
 
-  // cv2.resize maps each axis by its OWN ratio, not by the single letterbox
-  // gain: newW is a rounded value, so newW/w and newH/h differ slightly and
-  // sampling both axes at `scale` walks up to a third of a pixel off by the far
-  // edge. On line art that is the difference between landing on a hairline and
-  // beside it -- measured 134/255 peak error against cv2, versus 0.8/255 here.
-  const scaleX = newW / w;
-  const scaleY = newH / h;
-
+  // Each axis maps by its OWN ratio (newW/w and newH/h), as cv2.resize does, not
+  // by the single letterbox gain: newW is rounded, so sampling both axes at
+  // `scale` would walk up to a third of a pixel off by the far edge.
+  const wx = yoloAxisWeights(newW, w);
+  const wy = yoloAxisWeights(newH, h);
+  const rowAcc = new Float32Array(newW * 3);
   for (let y = 0; y < newH; y++) {
-    // Bilinear sample positions (align pixel centers, cv2.INTER_LINEAR style).
-    const sy = Math.min(Math.max((y + 0.5) / scaleY - 0.5, 0), h - 1);
-    const y0 = Math.floor(sy);
-    const y1 = Math.min(y0 + 1, h - 1);
-    const fy = sy - y0;
+    rowAcc.fill(0);
+    for (const [sy, fy] of wy[y]) {
+      if (fy === 0) continue;
+      const srcRow = sy * w;
+      for (let x = 0; x < newW; x++) {
+        let r = 0, g = 0, b = 0;
+        for (const [sx, fx] of wx[x]) {
+          const p = (srcRow + sx) * 4;
+          r += rgba[p] * fx; g += rgba[p + 1] * fx; b += rgba[p + 2] * fx;
+        }
+        rowAcc[x * 3] += r * fy; rowAcc[x * 3 + 1] += g * fy; rowAcc[x * 3 + 2] += b * fy;
+      }
+    }
     const row = (padY + y) * netW + padX;
     for (let x = 0; x < newW; x++) {
-      const sx = Math.min(Math.max((x + 0.5) / scaleX - 0.5, 0), w - 1);
-      const x0 = Math.floor(sx);
-      const x1 = Math.min(x0 + 1, w - 1);
-      const fx = sx - x0;
-      const p00 = (y0 * w + x0) * 4, p01 = (y0 * w + x1) * 4;
-      const p10 = (y1 * w + x0) * 4, p11 = (y1 * w + x1) * 4;
-      const w00 = (1 - fy) * (1 - fx), w01 = (1 - fy) * fx;
-      const w10 = fy * (1 - fx), w11 = fy * fx;
-      const o = row + x;
-      for (let c = 0; c < 3; c++) {
-        const v = rgba[p00 + c] * w00 + rgba[p01 + c] * w01 +
-                  rgba[p10 + c] * w10 + rgba[p11 + c] * w11;
-        data[c * plane + o] = v / 255;
-      }
+      data[row + x] = rowAcc[x * 3] / 255;
+      data[plane + row + x] = rowAcc[x * 3 + 1] / 255;
+      data[2 * plane + row + x] = rowAcc[x * 3 + 2] / 255;
     }
   }
   return { data, netW, netH, scale, padX, padY };
 }
-
-/* Decode the end-to-end YOLO26 ONNX output — [1, N, 6] rows of
- * (x1, y1, x2, y2, confidence, class) in letterboxed 640x640 pixels — into
- * [box, confidence, class] triples in source-image pixels, keeping everything
- * at or above `conf`. Callers split the classes and apply their own bars;
- * detectPanelsYolo decodes at YOLO_WEAK_CONF because sub-threshold panel boxes
- * are still wanted as corroboration (see yoloSplitFramesOverSubpanels). */
-function yoloDecodeOutput(out, rows, lb, imgW, imgH, conf) {
-  conf = conf === undefined ? YOLO_CONF_THRESHOLD : conf;
-  const decoded = [];
-  for (let i = 0; i < rows; i++) {
-    const o = i * 6;
-    const score = out[o + 4];
-    if (score < conf) continue;
-    const x1 = Math.min(Math.max((out[o] - lb.padX) / lb.scale, 0), imgW);
-    const y1 = Math.min(Math.max((out[o + 1] - lb.padY) / lb.scale, 0), imgH);
-    const x2 = Math.min(Math.max((out[o + 2] - lb.padX) / lb.scale, 0), imgW);
-    const y2 = Math.min(Math.max((out[o + 3] - lb.padY) / lb.scale, 0), imgH);
-    decoded.push([[Math.trunc(x1), Math.trunc(y1), Math.trunc(x2), Math.trunc(y2)],
-                  score, Math.round(out[o + 5])]);
-  }
-  return decoded;
-}
-
-/* ── Post-processing ported from convert_manga.py ─────────────── */
 
 function yoloBoxArea(b) {
   return Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
@@ -153,43 +142,45 @@ function yoloOverlapArea(a, b) {
   return Math.max(0, ox2 - ox1) * Math.max(0, oy2 - oy1);
 }
 
-/* Collapse boxes that substantially overlap into their union (measured
- * against the smaller box so containment is caught either way), highest
- * confidence first. Port of convert_manga.py:_dedupe_boxes. */
-function yoloDedupeBoxes(boxesWithConf, overlapThresh) {
-  overlapThresh = overlapThresh === undefined ? 0.6 : overlapThresh;
-  const ordered = boxesWithConf.slice().sort((a, b) => b[1] - a[1]);
+function yoloIoU(a, b) {
+  const inter = yoloOverlapArea(a, b);
+  const union = yoloBoxArea(a) + yoloBoxArea(b) - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+/* Greedy non-maximum suppression within one class: highest score first, dropping any box that
+ * overlaps an already kept one by more than `iou`. Takes and returns [box, score, cls]. */
+function yoloNms(dets, iou) {
+  const ordered = dets.slice().sort((a, b) => b[1] - a[1]);
   const kept = [];
-  for (const [box] of ordered) {
-    const area = yoloBoxArea(box);
-    if (area === 0) continue;
-    let mergedInto = -1;
-    for (let i = 0; i < kept.length; i++) {
-      const kArea = yoloBoxArea(kept[i]);
-      if (kArea > 0 && yoloOverlapArea(box, kept[i]) / Math.min(area, kArea) > overlapThresh) {
-        mergedInto = i;
-        break;
-      }
-    }
-    if (mergedInto >= 0) {
-      const k = kept[mergedInto];
-      kept[mergedInto] = [Math.min(k[0], box[0]), Math.min(k[1], box[1]),
-                          Math.max(k[2], box[2]), Math.max(k[3], box[3])];
-    } else {
-      kept.push(box.slice());
-    }
+  for (const d of ordered) {
+    if (kept.every((k) => yoloIoU(k[0], d[0]) <= iou)) kept.push(d);
   }
   return kept;
 }
 
-/* Degenerate detections: small relative to the page AND extremely elongated.
- * Port of convert_manga.py:is_sliver_panel. */
-function isSliverPanel(box, pageW, pageH) {
-  const w = Math.max(1, box[2] - box[0]);
-  const h = Math.max(1, box[3] - box[1]);
-  const areaFrac = (w * h) / Math.max(1, pageW * pageH);
-  const aspect = Math.max(w / h, h / w);
-  return areaFrac < 0.025 && aspect > 4.0;
+/* Decode the raw ultralytics head — a [1, 4 + classes (+ mask coefficients), N] tensor holding,
+ * per anchor, (cx, cy, w, h) in letterboxed pixels and one score per class — into
+ * [box, score, class] triples in source-image pixels. Each anchor takes its best class; anything
+ * under `minConf` is dropped, and boxes of one class that overlap are suppressed. */
+function yoloDecodeHead(out, dims, lb, imgW, imgH, minConf) {
+  const n = dims[2];
+  const byClass = Array.from({ length: YOLO_NUM_CLASSES }, () => []);
+  const toX = (v) => Math.min(Math.max((v - lb.padX) / lb.scale, 0), imgW);
+  const toY = (v) => Math.min(Math.max((v - lb.padY) / lb.scale, 0), imgH);
+  for (let i = 0; i < n; i++) {
+    let cls = -1, score = 0;
+    for (let c = 0; c < YOLO_NUM_CLASSES; c++) {
+      const s = out[(4 + c) * n + i];
+      if (s > score) { score = s; cls = c; }
+    }
+    if (cls < 0 || score < minConf) continue;
+    const cx = out[i], cy = out[n + i], bw = out[2 * n + i], bh = out[3 * n + i];
+    const box = [toX(cx - bw / 2), toY(cy - bh / 2), toX(cx + bw / 2), toY(cy + bh / 2)];
+    if (box[2] - box[0] < 1 || box[3] - box[1] < 1) continue;
+    byClass[cls].push([box, score, cls]);
+  }
+  return byClass.flatMap((list) => yoloNms(list, YOLO_NMS_IOU));
 }
 
 /* Padding to put around a text box before growing a panel over it, scaled to
@@ -242,122 +233,46 @@ function yoloExpandPanelsOverText(panels, texts, pageW, pageH) {
   return expanded;
 }
 
-/* Replace a frame with the sub-panels the model also found inside it.
- *
- * Neighbouring panels come back as one frame when their shared border is faint
- * or their artwork runs across it -- a whole row of a western strip can arrive
- * as a single box. The model usually does see the individual panels, just below
- * the confidence bar, and yoloDedupeBoxes() then folds those weaker boxes into
- * the frame that contains them. This recovers them: a weak box is trusted only
- * where a set of siblings tiles a confident frame, so nothing is admitted that
- * the model did not propose and no frame is split on the strength of one stray
- * box. Port of convert_manga.py:split_frames_over_subpanels. */
-function yoloSplitFramesOverSubpanels(frames, candidates) {
-  const out = [];
-  for (const frame of frames) {
-    const frameArea = yoloBoxArea(frame);
-    const children = candidates.filter((box) => {
-      const area = yoloBoxArea(box);
-      return area > 0 && area <= SUBPANEL_MAX_AREA_FRAC * frameArea &&
-             yoloOverlapArea(box, frame) >= SUBPANEL_INSIDE_FRAC * area;
-    });
-    const covered = children.reduce((sum, c) => sum + yoloBoxArea(c), 0);
-    if (children.length < 2 || covered < SUBPANEL_COVER_FRAC * frameArea) {
-      out.push(frame);
-      continue;
+/* Sort decoded [box, score, class] triples into {frames, texts}: panel boxes at or above `conf`,
+ * or one full-page box when none clears it, and the text and balloon boxes at or above
+ * YOLO_TEXT_CONF. Boxes become integer pixels, rounded outward so a crop never shaves the frame
+ * line off. */
+function yoloSplitDetections(dets, w, h, conf) {
+  const frames = [], texts = [];
+  for (const [box, score, cls] of dets) {
+    const b = [Math.floor(box[0]), Math.floor(box[1]), Math.ceil(box[2]), Math.ceil(box[3])];
+    if (cls === YOLO_PANEL_CLASS) {
+      if (score >= conf) frames.push(b);
+    } else if (score >= YOLO_TEXT_CONF) {
+      texts.push(b);
     }
-    let tiles = true;
-    for (let i = 0; i < children.length && tiles; i++) {
-      for (let j = i + 1; j < children.length; j++) {
-        const smaller = Math.min(yoloBoxArea(children[i]), yoloBoxArea(children[j]));
-        if (yoloOverlapArea(children[i], children[j]) > SUBPANEL_SIBLING_OVERLAP_FRAC * smaller) {
-          tiles = false;
-          break;
-        }
-      }
-    }
-    if (tiles) out.push(...children.map((c) => c.slice()));
-    else out.push(frame);
   }
-  return out;
+  return { frames: frames.length ? frames : [[0, 0, w, h]], texts };
 }
 
-/* Fraction of the page the given boxes cover, overlaps counted twice. Only ever compared
- * against a threshold to judge whether a detection pass saw the page at all, so
- * double-counting an overlap is not worth the cost of a union. Port of
- * convert_manga.py:_panel_cover_frac. */
-function yoloPanelCoverFrac(boxes, w, h) {
-  let area = 0;
-  for (const b of boxes) area += (b[2] - b[0]) * (b[3] - b[1]);
-  return area / Math.max(1, w * h);
-}
-
-/* Full pipeline for one page: letterbox → inference → decode → sliver filter
- * → dedupe → sub-panel recovery, falling back to one full-page box when nothing
- * is detected — mirrors convert_manga.py:_detect_panels_yolo. Returns
- * {frames, texts}: the frames as drawn (what reading order must be derived
- * from) and the text boxes yoloExpandPanelsOverText() then grows the CROP
- * rectangles over. `session` is an ONNX Runtime InferenceSession for the panel
- * model; `ortApi` is the onnxruntime module (for its Tensor constructor). */
-async function detectPanelsYoloAtSize(session, ortApi, rgba, w, h, conf, size) {
-  const lb = yoloLetterbox(rgba, w, h, size);
-  const inputName = session.inputNames[0];
-  const feeds = {};
-  // The model is exported with dynamic height/width so the rectangular
-  // letterbox above can be fed as-is, exactly as ultralytics does.
-  feeds[inputName] = new ortApi.Tensor("float32", lb.data, [1, 3, lb.netH, lb.netW]);
-  const results = await session.run(feeds);
-  const output = results[session.outputNames[0]];
-  const rows = output.dims[output.dims.length - 2];
-
-  const decoded = yoloDecodeOutput(output.data, rows, lb, w, h, YOLO_WEAK_CONF);
-  const strong = [];
-  const candidates = [];
-  const texts = [];
-  for (const [box, score, cls] of decoded) {
-    if (cls === YOLO_TEXT_CLASS) {
-      if (score >= conf) texts.push(box);  // a weak text box must not grow a crop
-      continue;
-    }
-    if (cls !== YOLO_PANEL_CLASS) continue;
-    if (isSliverPanel(box, w, h)) continue;
-    candidates.push(box);
-    if (score >= conf) strong.push([box, score]);
-  }
-
-  const boxes = yoloDedupeBoxes(strong);
-  // Measured on the CONFIDENT boxes, not on the full-page fallback frame below: that frame
-  // covers the page by construction and would mask a failed pass.
-  const cover = yoloPanelCoverFrac(boxes, w, h);
-  if (!boxes.length) return { frames: [[0, 0, w, h]], texts, cover };
-  return { frames: yoloSplitFramesOverSubpanels(boxes, candidates), texts, cover };
-}
-
-/* One page through the model, retrying at a larger input when the first pass barely covers
- * it and keeping whichever pass saw more. The model's panel head is scale-sensitive: a small,
- * sparsely inked page (a hand-drawn 4-koma, say) letterboxed into the default 640 can come
- * back as a single box covering a tenth of the page, while the same page at 1600 is fully
- * panelled. Pages the model already reads well never reach the retry, and a genuine full-page
- * splash keeps its single box: one panel covering the page is high coverage, not low.
- * Port of convert_manga.py:_detect_panels_yolo. */
+/* One page through the model. Returns {frames, texts}: the panels as drawn (what reading order is
+ * derived from) and the text and balloon boxes yoloExpandPanelsOverText() then grows the CROP
+ * rectangles over; a balloon box covers the whole bubble outline, a text box only its glyphs.
+ * `session` is an ONNX Runtime InferenceSession for YOLO_MODEL_URL; `ortApi` is the onnxruntime
+ * module (for its Tensor constructor). */
 async function detectPanelsYolo(session, ortApi, rgba, w, h, conf) {
   conf = conf === undefined ? YOLO_CONF_THRESHOLD : conf;
-  const first = await detectPanelsYoloAtSize(session, ortApi, rgba, w, h, conf, YOLO_INPUT_SIZE);
-  if (first.cover >= YOLO_RETRY_COVER_FRAC) return first;
-  const retry = await detectPanelsYoloAtSize(session, ortApi, rgba, w, h, conf, YOLO_RETRY_INPUT_SIZE);
-  return retry.cover > first.cover ? retry : first;
+  const lb = yoloLetterbox(rgba, w, h, YOLO_INPUT_SIZE);
+  // The model is exported with dynamic height/width so the rectangular
+  // letterbox above can be fed as-is, exactly as ultralytics does.
+  const feeds = { [session.inputNames[0]]: new ortApi.Tensor("float32", lb.data, [1, 3, lb.netH, lb.netW]) };
+  const results = await session.run(feeds);
+  const output = results[session.outputNames[0]];
+  const dets = yoloDecodeHead(output.data, output.dims, lb, w, h, Math.min(conf, YOLO_TEXT_CONF));
+  return yoloSplitDetections(dets, w, h, conf);
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
-    YOLO_INPUT_SIZE, YOLO_STRIDE, YOLO_CONF_THRESHOLD, YOLO_WEAK_CONF,
-    YOLO_PANEL_CLASS, YOLO_TEXT_CLASS,
+    YOLO_MODEL_URL, YOLO_INPUT_SIZE, YOLO_STRIDE, YOLO_NUM_CLASSES, YOLO_CONF_THRESHOLD,
+    YOLO_TEXT_CONF, YOLO_NMS_IOU, YOLO_PANEL_CLASS, YOLO_TEXT_CLASS, YOLO_BALLOON_CLASS,
     TEXT_OWNERSHIP_MIN_FRAC, TEXT_PAD_FRAC_OF_PAGE, TEXT_PAD_MIN,
-    SUBPANEL_MAX_AREA_FRAC, SUBPANEL_INSIDE_FRAC, SUBPANEL_COVER_FRAC,
-    SUBPANEL_SIBLING_OVERLAP_FRAC, YOLO_RETRY_COVER_FRAC, YOLO_RETRY_INPUT_SIZE,
-    yoloPanelCoverFrac,
-    yoloLetterbox, yoloDecodeOutput, yoloDedupeBoxes, isSliverPanel,
-    yoloBoxArea, yoloOverlapArea, yoloTextPadPx, yoloExpandPanelsOverText,
-    yoloSplitFramesOverSubpanels, detectPanelsYolo,
+    yoloAxisWeights, yoloLetterbox, yoloDecodeHead, yoloNms, yoloIoU, yoloSplitDetections,
+    yoloBoxArea, yoloOverlapArea, yoloTextPadPx, yoloExpandPanelsOverText, detectPanelsYolo,
   };
 }
