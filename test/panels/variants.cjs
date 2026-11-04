@@ -10,7 +10,7 @@ const path = require("path");
 const yolo = require("../../js/yolo.js");
 const manga = require("../../js/manga-core.js");
 
-const SHIPPED = path.join(__dirname, "..", "..", "models", "manga_panel_detector_yolo26n.onnx");
+const SHIPPED = path.join(__dirname, "..", "..", yolo.YOLO_MODEL_URL);
 
 module.exports = {
   // The white-gutter heuristic: the converter's fallback, with no model at all.
@@ -20,7 +20,7 @@ module.exports = {
       return manga.detectPanelsGrid(manga.grayFromRGBA(rgba, w, h), w, h);
     },
   },
-  // What the converter ships: detectPanelsYolo() and its model.
+  // What the converter ships: detectPanelsYolo() with js/yolo.js's model.
   shipped: {
     models: [SHIPPED],
     async run(ctx, rgba, w, h) {

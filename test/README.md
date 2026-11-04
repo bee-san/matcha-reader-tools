@@ -111,7 +111,7 @@ furigana with Gemini stubbed to the reference answers), and `fonts.html`.
 | `zh/`, `ref_dict_zh*/`, `ref_dict_yue/` | synthetic, `convert_jmdict.py --lang zh/yue` | the Chinese paths, every option at once |
 | `zh/book.epub`, `ref_pinyin/` | synthetic, `add_pinyin_ruby.py` | pinyin from the dictionary, XHTML comparison |
 | `zh/ai_*.xhtml`, `zh/ai_*_answers.json`, `ref_ruby_ai/` | synthetic, `add_pinyin_ruby.py` / `add_furigana_ruby.py` with the answers file standing in for Gemini | AI pinyin and furigana, XHTML comparison; some answers are wrong on purpose |
-| `ref_yolo/boxes.json` | the shipped ONNX model | panel boxes, ±2px |
+| `ref_yolo/boxes.json` | the shipped ONNX model, decoded by a numpy port of `js/yolo.js` | panel boxes, ±2px |
 | `ref_font/` | the firmware's `fontconvert_sdcard.py` | `.cpfont` structure |
 
 ## Panel-detection benchmark
@@ -160,14 +160,14 @@ sha256 differs from the label's.
 
 ### How the labels were made
 
-The set the benchmark was built on is 55 pages from 37 series (one volume each) in
+The set behind the numbers in the main README is 55 pages from 37 series (one volume each) in
 one reader's mokuro library, chosen by eye from 160 random pages to cover dense action pages,
 4-koma, splash and chapter-title pages, colour pages, borderless and bleeding panels, slanted
 and overlapping panels, black gutters, bubbles crossing borders and one two-page spread (248
 panels, 2 ignored). None of it is Manga109, which every candidate model was trained on.
 
-Four detectors proposed boxes for each page (RT-DETRv4-X, a Manga109 YOLO26s, YOLO11m and the
-shipped YOLO26n), averaged where two or more agreed; the labeller saw them as hints only.
+Four detectors proposed boxes for each page (RT-DETRv4-X, the YOLO26s now shipped, YOLO11m and
+the old YOLO26n), averaged where two or more agreed; the labeller saw them as hints only.
 Every page was then labelled by looking at it plain, with the proposals, and with the labels
 drawn over it on a pixel grid, zooming in on doubtful edges. The rules:
 

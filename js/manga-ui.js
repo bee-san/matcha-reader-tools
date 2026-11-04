@@ -536,9 +536,8 @@ async function epubNativeToc(zip, opf, opfDir, spineMap, pages) {
   return resolved;
 }
 
-/* ── AI panel detection (lazy-loaded ONNX Runtime + YOLO26 model) ── */
+/* ── AI panel detection (lazy-loaded ONNX Runtime + the YOLO_MODEL_URL model from yolo.js) ── */
 
-const YOLO_MODEL_URL = "models/manga_panel_detector_yolo26n.onnx";
 const ORT_DIR = "js/vendor/ort/";
 let yoloLoadPromise = null; // resolves to {ort, session}; reset to null on failure
 
@@ -625,7 +624,7 @@ const BOOK_TYPE_HINTS = {
 };
 
 const YOLO_HINT = "Finds panels more reliably, even ones without a white border. Runs in the " +
-  "browser; pages are never uploaded. A one-time 21 MB download. Untick for a faster, simpler " +
+  "browser; pages are never uploaded. A one-time 31 MB download. Untick for a faster, simpler " +
   "search that looks for white space between panels.";
 const YOLO_HINT_WEBTOON = "Not used for webtoons. Their panels are cut where the strip has white " +
   "space, and the AI only finds panels on a normal page.";
@@ -1321,7 +1320,7 @@ async function runMangaConversion() {
       let yolo = null;
       if ($("manga-yolo").checked) {
         try {
-          logLine("Loading AI panel detector (first load downloads ~21 MB, then it's cached)…");
+          logLine("Loading AI panel detector (first load downloads ~31 MB, then it's cached)…");
           yolo = await loadYoloDetector();
           logLine("AI panel detector ready");
         } catch (e) {

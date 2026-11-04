@@ -10,7 +10,7 @@ Produces under test/fixtures/:
     manga_fullbleed.cbz  borderless pages (one full-page panel each), for panels-only
     manga_foldered.cbz   one folder per chapter, page numbers restarting in each
     ref_manga/           convert_manga.py --no-ocr output
-    ref_yolo/boxes.json  YOLO panel boxes (needs numpy + onnxruntime, else skipped)
+    ref_yolo/boxes.json  AI panel boxes (needs numpy + onnxruntime, else skipped)
     ref_manga_pdf/       convert_manga.py --no-ocr output for the PDF fixture
                          (needs pymupdf, else skipped)
     yomitan.zip          synthetic Yomitan dictionary
@@ -262,21 +262,19 @@ def run_manga_epub_reference():
 
 
 def run_yolo_reference():
-    """Reference panel boxes for the AI (YOLO) detection path.
+    """Reference panel boxes for the AI detection path.
 
-    Mirrors js/yolo.js preprocessing/decoding numerically (bilinear letterbox,
-    float32 tensor) against the same ONNX model the site ships
-    (models/manga_panel_detector_yolo26n.onnx), then reuses the firmware tool's
-    own is_sliver_panel / _dedupe_boxes / split_frames_over_subpanels /
-    sort_panels_reading_order / expand_panels_over_text so post-processing
-    semantics can't drift from convert_manga.py.
+    An independent numpy implementation of js/yolo.js (letterbox resampling,
+    the model's raw head decoded per anchor to its best class, per-class
+    non-maximum suppression) against the ONNX model the site ships
+    (js/yolo.js:YOLO_MODEL_URL). Reading order and growing crops over text use
+    the firmware tool's own sort_panels_reading_order / expand_panels_over_text,
+    which js/manga-core.js and js/yolo.js port.
 
-    Decoding runs at PANEL_WEAK_CONF, not the panel bar: sub-threshold panel
-    boxes are kept as corroboration for splitting a merged frame, and the text
-    class drives the bubble-aware crop expansion. Both mirror js/yolo.js.
-
-    Inference backends differ in float rounding, so the JS comparison is
-    tolerance-based (±2 px), unlike the byte-exact grid references.
+    The model is not the one convert_manga.py downloads, so these boxes are not
+    the Python tool's output: they pin the JS decoding to a second
+    implementation. Inference backends differ in float rounding, so the JS
+    comparison is tolerance-based (±2 px), unlike the byte-exact grid references.
     """
     try:
         import numpy as np
@@ -288,17 +286,38 @@ def run_yolo_reference():
     sys.path.insert(0, os.path.join(FIRMWARE, "tools", "manga_convert"))
     import convert_manga
 
-    model_path = os.path.join(os.path.dirname(__file__), "..", "models",
-                              "manga_panel_detector_yolo26n.onnx")
-    sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-    size, stride, conf_thresh = 640, 32, 0.4
-    weak_conf = convert_manga.PANEL_WEAK_CONF
+    root = os.path.join(os.path.dirname(__file__), "..")
+    with open(os.path.join(root, "js", "yolo.js"), encoding="utf-8") as f:
+        src = f.read()
+    model_url = src.split('const YOLO_MODEL_URL = "', 1)[1].split('"', 1)[0]
+    sess = ort.InferenceSession(os.path.join(root, model_url), providers=["CPUExecutionProvider"])
+    size, stride = 640, 32
+    panel_conf, text_conf, nms_iou, num_classes = 0.45, 0.4, 0.7, 3
+
+    def axis_weights(dst, src):
+        # js/yolo.js:yoloAxisWeights as a matrix: a box filter (coverage-weighted)
+        # when shrinking, bilinear with cv2.INTER_LINEAR's centre alignment when
+        # enlarging.
+        m = np.zeros((dst, src))
+        ratio = src / dst
+        for i in range(dst):
+            if ratio > 1:
+                lo, hi = i * ratio, (i + 1) * ratio
+                for k in range(int(np.floor(lo)), min(src, int(np.ceil(hi)))):
+                    m[i, k] += (min(k + 1, hi) - max(k, lo)) / ratio
+            else:
+                pos = min(max((i + 0.5) * ratio - 0.5, 0), src - 1)
+                k0 = int(np.floor(pos)); k1 = min(k0 + 1, src - 1); f = pos - k0
+                m[i, k0] += 1 - f
+                m[i, k1] += f
+        return m
 
     def letterbox(rgb):
-        # ultralytics LetterBox(new_shape=640, auto=True, stride=32): the long side
-        # is scaled to 640 and the short side padded only to the next multiple of
-        # 32, NOT out to a square. js/yolo.js:yoloLetterbox does the same, and the
-        # model is exported with dynamic height/width so both can feed it.
+        # ultralytics LetterBox(new_shape=640, auto=True, stride=32) geometry: the
+        # long side is scaled to 640 and the short side padded only to the next
+        # multiple of 32, NOT out to a square. js/yolo.js:yoloLetterbox does the
+        # same, and the model is exported with dynamic height/width so both can
+        # feed it. Each axis maps by its own ratio (nw/w, nh/h).
         h, w = rgb.shape[:2]
         scale = min(size / w, size / h)
         nw, nh = round(w * scale), round(h * scale)
@@ -307,19 +326,18 @@ def run_yolo_reference():
         net_w = nw + padx + max(0, round(dw + 0.1))
         net_h = nh + pady + max(0, round(dh + 0.1))
         out = np.full((3, net_h, net_w), np.float32(114 / 255), dtype=np.float32)
-        # Each axis maps by its own ratio, as cv2.resize does: nw is rounded, so
-        # nw/w and nh/h differ slightly and sampling both at `scale` drifts by up
-        # to a third of a pixel. js/yolo.js:yoloLetterbox does the same.
-        ys = np.clip((np.arange(nh) + 0.5) / (nh / h) - 0.5, 0, h - 1)
-        xs = np.clip((np.arange(nw) + 0.5) / (nw / w) - 0.5, 0, w - 1)
-        y0 = np.floor(ys).astype(int); y1 = np.minimum(y0 + 1, h - 1)
-        x0 = np.floor(xs).astype(int); x1 = np.minimum(x0 + 1, w - 1)
-        fy = (ys - y0)[:, None, None]; fx = (xs - x0)[None, :, None]
+        wy, wx = axis_weights(nh, h), axis_weights(nw, w)
         p = rgb.astype(np.float64)
-        resized = (p[y0][:, x0] * (1 - fy) * (1 - fx) + p[y0][:, x1] * (1 - fy) * fx +
-                   p[y1][:, x0] * fy * (1 - fx) + p[y1][:, x1] * fy * fx)
-        out[:, pady:pady + nh, padx:padx + nw] = (resized / 255).transpose(2, 0, 1).astype(np.float32)
+        resized = np.stack([wy @ p[:, :, c] @ wx.T for c in range(3)])
+        out[:, pady:pady + nh, padx:padx + nw] = (resized / 255).astype(np.float32)
         return out[None], scale, padx, pady
+
+    def iou(a, b):
+        ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+        iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+        inter = ix * iy
+        union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+        return inter / union if union > 0 else 0.0
 
     pages_dir = os.path.join(FIXTURES, "manga_pages")
     out_dir = os.path.join(FIXTURES, "ref_yolo")
@@ -330,36 +348,36 @@ def run_yolo_reference():
             continue
         img = Image.open(os.path.join(pages_dir, name)).convert("RGB")
         inp, scale, padx, pady = letterbox(np.asarray(img))
-        rows = sess.run(None, {sess.get_inputs()[0].name: inp})[0][0]
-        boxes_with_conf = []
-        candidates = []
-        texts = []
-        for x1, y1, x2, y2, conf, cls in rows:
-            if conf < weak_conf:
+        head = sess.run(None, {sess.get_inputs()[0].name: inp})[0][0]   # [4 + classes + coeffs, N]
+        scores = head[4:4 + num_classes]
+        cls = scores.argmax(0)
+        best = scores.max(0)
+        by_class = {c: [] for c in range(num_classes)}
+        for i in np.nonzero(best >= min(panel_conf, text_conf))[0]:
+            cx, cy, bw, bh = (float(v) for v in head[:4, i])
+            box = [min(max((cx - bw / 2 - padx) / scale, 0), img.width),
+                   min(max((cy - bh / 2 - pady) / scale, 0), img.height),
+                   min(max((cx + bw / 2 - padx) / scale, 0), img.width),
+                   min(max((cy + bh / 2 - pady) / scale, 0), img.height)]
+            if box[2] - box[0] < 1 or box[3] - box[1] < 1:
                 continue
-            box = [int(max(0, min((x1 - padx) / scale, img.width))),
-                   int(max(0, min((y1 - pady) / scale, img.height))),
-                   int(max(0, min((x2 - padx) / scale, img.width))),
-                   int(max(0, min((y2 - pady) / scale, img.height)))]
-            cls = round(float(cls))
-            if cls == 1:
-                if conf >= conf_thresh:
-                    texts.append(box)
-                continue
-            if cls != 0:
-                continue
-            if convert_manga.is_sliver_panel(box, img.width, img.height):
-                continue
-            candidates.append(box)
-            if conf >= conf_thresh:
-                boxes_with_conf.append((box, float(conf)))
-        boxes = convert_manga._dedupe_boxes(boxes_with_conf)
-        if not boxes:
-            boxes = [[0, 0, img.width, img.height]]
-        else:
-            boxes = convert_manga.split_frames_over_subpanels(boxes, candidates)
-        boxes = convert_manga.sort_panels_reading_order(boxes)
-        result[name] = convert_manga.expand_panels_over_text(boxes, texts, img.width, img.height)
+            by_class[int(cls[i])].append((box, float(best[i])))
+        frames, texts = [], []
+        for c, dets in by_class.items():
+            kept = []
+            for box, score in sorted(dets, key=lambda d: -d[1]):
+                if all(iou(k[0], box) <= nms_iou for k in kept):
+                    kept.append((box, score))
+            for box, score in kept:
+                ibox = [int(np.floor(box[0])), int(np.floor(box[1])), int(np.ceil(box[2])), int(np.ceil(box[3]))]
+                if c == 0 and score >= panel_conf:
+                    frames.append(ibox)
+                elif c != 0 and score >= text_conf:
+                    texts.append(ibox)
+        if not frames:
+            frames = [[0, 0, img.width, img.height]]
+        frames = convert_manga.sort_panels_reading_order(frames)
+        result[name] = convert_manga.expand_panels_over_text(frames, texts, img.width, img.height)
     with open(os.path.join(out_dir, "boxes.json"), "w") as f:
         json.dump(result, f, indent=1)
     print(f"yolo reference: {out_dir}")

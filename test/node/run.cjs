@@ -764,28 +764,12 @@ async function testMangaEpub() {
   check("identifier varies with title", epub.epubIdentifier("Other", "Test Author", spine.length) !== identifier);
 }
 
-/* ── Manga: detection-retry gate (vs convert_manga.py) ────── */
-
-function testMangaCoverGate() {
-  console.log("manga detection-retry coverage gate:");
-  const { yoloPanelCoverFrac: cover, YOLO_RETRY_COVER_FRAC: gate } = require("../../js/yolo.js");
-
-  // One banner-sized box on a whole page: what a failed detection pass looks like.
-  check("a sparse page falls under the gate", cover([[0, 0, 600, 100]], 1200, 1700) < gate);
-  // A genuine single-panel splash covers the page, so it must not be retried.
-  check("a full-page splash stays above the gate", cover([[0, 0, 1200, 1700]], 1200, 1700) >= gate);
-  check("a panelled page stays above the gate",
-        cover([0, 420, 840, 1260].map(y => [0, y, 1200, y + 400]), 1200, 1700) >= gate);
-  check("no boxes cover nothing", cover([], 1200, 1700) === 0);
-}
-
 /* ── Manga: bubble-aware panel crops (vs convert_manga.py) ────── */
 
 function testMangaBubbleCrops() {
   console.log("manga bubble-aware panel crops:");
   const yolo = require("../../js/yolo.js");
-  const { yoloExpandPanelsOverText: expand, yoloSplitFramesOverSubpanels: split,
-          yoloTextPadPx: padPx } = yolo;
+  const { yoloExpandPanelsOverText: expand, yoloTextPadPx: padPx } = yolo;
   const pad = padPx(800, 800);
 
   // A caption drawn above the frame border must not be sliced off, and the crop
@@ -816,26 +800,62 @@ function testMangaBubbleCrops() {
 
   check("pad scales with the page",
         padPx(290, 420) < padPx(1024, 1449) && padPx(1024, 1449) < padPx(1364, 2000));
+}
 
-  // A strip the model returned as one frame, but also saw three panels in.
-  const frame = [0, 0, 900, 300];
-  const kids = [[0, 0, 290, 300], [300, 0, 590, 300], [600, 0, 900, 300]];
-  check("a merged row is split into its subpanels",
-        JSON.stringify(split([frame], kids.concat([frame]))) === JSON.stringify(kids));
+/* ── Manga: decoding the panel model's raw head ───────────────── */
 
-  check("a frame seen twice at two scales is not split",
-        JSON.stringify(split([frame], [frame, [4, 3, 896, 297]])) === JSON.stringify([frame]));
+function testMangaYoloDecode() {
+  console.log("manga panel model output decoding:");
+  const yolo = require("../../js/yolo.js");
+  const C = 4 + yolo.YOLO_NUM_CLASSES + 32;   // box, class scores, mask coefficients
+  // A raw head is [1, C, N], one column per anchor: (cx, cy, w, h, scores..., coefficients...).
+  function head(anchors) {
+    const n = anchors.length, out = new Float32Array(C * n);
+    anchors.forEach(([cx, cy, w, h, scores], i) => {
+      out[i] = cx; out[n + i] = cy; out[2 * n + i] = w; out[3 * n + i] = h;
+      scores.forEach((v, c) => { out[(4 + c) * n + i] = v; });
+    });
+    return { out, dims: [1, C, n] };
+  }
+  const lb = { scale: 0.5, padX: 10, padY: 0 };   // a 2x page, letterboxed 10 px from the left
+  const { out, dims } = head([
+    [110, 100, 100, 100, [0.9, 0.1, 0]],          // panel
+    [112, 102, 100, 100, [0.8, 0, 0]],            // the same panel, weaker: suppressed
+    [300, 100, 100, 100, [0.3, 0, 0.6]],          // a balloon, its panel score lower
+    [500, 500, 50, 50, [0.05, 0, 0]],             // noise
+  ]);
+  const dets = yolo.yoloDecodeHead(out, dims, lb, 1000, 1000, 0.25);
+  const panels = dets.filter((d) => d[2] === yolo.YOLO_PANEL_CLASS);
+  check("one panel survives suppression", panels.length === 1 && panels[0][1] === Number(Math.fround(0.9)));
+  check("boxes map back through the letterbox",
+        JSON.stringify(panels[0][0]) === JSON.stringify([100, 100, 300, 300]));
+  check("each anchor takes its best class",
+        dets.some((d) => d[2] === yolo.YOLO_BALLOON_CLASS) && dets.length === 2);
+  check("boxes are clamped to the page",
+        JSON.stringify(yolo.yoloDecodeHead(head([[10, 10, 100, 100, [1, 0, 0]]]).out, [1, C, 1], lb, 1000, 1000, 0.5)[0][0]) ===
+        JSON.stringify([0, 0, 100, 120]));
 
-  check("one stray box never splits a frame",
-        JSON.stringify(split([frame], [frame, [100, 60, 300, 240]])) === JSON.stringify([frame]));
+  const shrink = yolo.yoloAxisWeights(2, 5);
+  check("shrinking averages every covered source pixel",
+        JSON.stringify(shrink) === JSON.stringify([[[0, 0.4], [1, 0.4], [2, 0.2]], [[2, 0.2], [3, 0.4], [4, 0.4]]]));
+  check("enlarging interpolates the two nearest",
+        JSON.stringify(yolo.yoloAxisWeights(4, 2)) === JSON.stringify([[[0, 1], [1, 0]], [[0, 0.75], [1, 0.25]], [[0, 0.25], [1, 0.75]], [[1, 1], [1, 0]]]));
+  // A one-pixel line shrunk 4x stays a quarter-grey line rather than vanishing between samples.
+  const line = new Uint8Array(8 * 8 * 4).fill(255);
+  for (let y = 0; y < 8; y++) line.fill(0, (y * 8 + 5) * 4, (y * 8 + 5) * 4 + 3);
+  const small = yolo.yoloLetterbox(line, 8, 8, 2, 1);
+  check("a hairline survives a 4x shrink", Math.abs(small.data[1] - 0.75) < 1e-6 && small.data[0] === 1);
 
-  check("subpanels must account for the frame",
-        JSON.stringify(split([frame], [[0, 0, 150, 100], [160, 0, 310, 100], frame])) ===
-        JSON.stringify([frame]));
+  // Suppression is per class: a balloon on top of a panel must not remove it.
+  const nms = yolo.yoloNms([[[0, 0, 10, 10], 0.9, 0], [[0, 0, 10, 9], 0.8, 0], [[20, 0, 30, 10], 0.7, 0]], 0.7);
+  check("NMS keeps the best of overlapping boxes and the separate one", nms.length === 2 && nms[0][1] === 0.9);
 
-  check("overlapping subpanels are rejected",
-        JSON.stringify(split([frame], [[0, 0, 600, 300], [100, 0, 700, 300], frame])) ===
-        JSON.stringify([frame]));
+  const split = yolo.yoloSplitDetections([[[0.4, 0.6, 10.2, 10], 0.9, 0], [[1, 1, 5, 5], 0.42, 1],
+                                          [[1, 1, 9, 9], 0.3, 2], [[0, 0, 3, 3], 0.44, 0]], 100, 200, 0.45);
+  check("panels at the bar, texts at theirs, pixels rounded outward",
+        JSON.stringify(split) === JSON.stringify({ frames: [[0, 0, 11, 10]], texts: [[1, 1, 5, 5]] }));
+  check("no panel found means the whole page",
+        JSON.stringify(yolo.yoloSplitDetections([], 100, 200, 0.45).frames) === JSON.stringify([[0, 0, 100, 200]]));
 }
 
 /* ── Panel benchmark scoring (test/panels/metrics.cjs) ─────────── */
@@ -897,7 +917,7 @@ async function testMangaYolo() {
     return;
   }
   const yolo = require("../../js/yolo.js");
-  const model = new Uint8Array(fs.readFileSync(path.join(__dirname, "..", "..", "models", "manga_panel_detector_yolo26n.onnx")));
+  const model = new Uint8Array(fs.readFileSync(path.join(__dirname, "..", "..", yolo.YOLO_MODEL_URL)));
   const session = await ort.InferenceSession.create(model, { executionProviders: ["wasm"] });
 
   const pagesDir = path.join(FIXTURES, "manga_pages");
@@ -1468,8 +1488,8 @@ async function testMokuro() {
   testMangaMono();
   testMangaFit();
   await testMangaEpub();
-  testMangaCoverGate();
   testMangaBubbleCrops();
+  testMangaYoloDecode();
   testPanelMetrics();
   await testMangaYolo();
   await testDictYomitan();
